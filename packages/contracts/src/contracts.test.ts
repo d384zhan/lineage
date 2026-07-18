@@ -58,6 +58,20 @@ describe("shared contract fixtures", () => {
     expect(prompt).toContain("lineage_reply");
     expect(prompt).toContain("file: src/auth.ts");
   });
+
+  test("allows exact prompts only in transient answers", () => {
+    const answer = WireEnvelopeSchema.parse(wireFixtures[4]);
+    expect(answer.type).toBe("question.answer");
+    if (answer.type !== "question.answer") throw new Error("Expected answer fixture");
+    expect(answer.payload.quotedPrompt).toContain("rotating refresh tokens");
+
+    const decisionWithPrompt = {
+      ...domainFixture.decision,
+      quotedPrompt: "this must not become durable",
+    };
+    const persisted = DecisionRecordSchema.parse(decisionWithPrompt);
+    expect("quotedPrompt" in persisted).toBeFalse();
+  });
 });
 
 describe("consumer mocks", () => {

@@ -124,6 +124,7 @@ export class MockLineageTransport implements LineageTransport {
     requestId: "request-1",
     mode: "agent",
     text: "Token rotation limits replay.",
+    quotedPrompt: "Implement rotating refresh tokens and prevent replay.",
     evidence: [{ kind: "commit", value: "abcdef1234567890" }],
   };
   private handlers = new Set<MessageHandler>();

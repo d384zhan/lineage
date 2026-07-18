@@ -65,6 +65,7 @@
       "requestId": "request-1",
       "mode": "agent",
       "text": "Rotation limits replay.",
+      "quotedPrompt": "Implement rotating refresh tokens and prevent replay.",
       "evidence": [{ "kind": "commit", "value": "abcdef1234567890" }]
     }
   },

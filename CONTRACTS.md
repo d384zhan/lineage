@@ -101,6 +101,14 @@ relevant context into typed `IntentRecord`, `AgentAnswer`, and `DecisionRecord`
 objects through MCP tools. Questions and answers are transient unless an agent
 or developer explicitly records the result as a decision.
 
+The agent bridge may retain recent raw prompts in memory while its process is
+alive. After recipient approval, `AgentAnswer.quotedPrompt` may contain the
+exact originating prompt. This field is transient: it may be displayed and
+routed to the requester, but it must never be written to Git or mirrored into
+MongoDB. When an answer becomes durable, the agent paraphrases it into the
+decision's `summary` and `rationale`. After the session exits or compacts beyond
+the in-memory buffer, exact prompt recovery is not guaranteed.
+
 Current intent is stored in a per-user ref under
 `refs/lineage/intents/<user>-<hash>`. Each update creates a Git commit whose
 parent is the user's previous intent, giving the ref its own append-only

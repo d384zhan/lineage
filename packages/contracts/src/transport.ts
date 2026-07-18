@@ -17,6 +17,7 @@ export const AgentAnswerSchema = z.object({
   requestId: IdentifierSchema,
   mode: z.enum(["agent", "manual", "history"]),
   text: z.string().trim().min(1),
+  quotedPrompt: z.string().min(1).optional(),
   evidence: z.array(EvidenceRefSchema),
 });
 
@@ -131,6 +132,7 @@ export const AskInputSchema = z.object({
 export const ReplyInputSchema = z.object({
   requestId: IdentifierSchema,
   text: z.string().trim().min(1),
+  quotedPrompt: z.string().min(1).optional(),
   evidence: z.array(EvidenceRefSchema).default([]),
 });
 
