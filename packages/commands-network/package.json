@@ -1,0 +1,21 @@
+{
+  "name": "@lineage/commands-network",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lineage/commands-history": "workspace:*",
+    "@lineage/contracts": "workspace:*",
+    "@lineage/daemon": "workspace:*",
+    "@lineage/prompt-index": "workspace:*",
+    "@lineage/relay": "workspace:*",
+    "@lineage/transport": "workspace:*",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@lineage/git-store": "workspace:*"
+  }
+}

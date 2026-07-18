@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 import type { LineageCommand } from "@lineage/contracts";
 import { historyCommands } from "@lineage/commands-history";
+import { networkCommands } from "@lineage/commands-network";
 
 const commands = new Map<string, LineageCommand>(
-  historyCommands.map((command) => [command.name, command]),
+  [...historyCommands, ...networkCommands].map((command) => [command.name, command]),
 );
 
 const rawArgs = process.argv.slice(2);
