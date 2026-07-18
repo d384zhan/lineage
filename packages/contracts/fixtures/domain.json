@@ -1,0 +1,55 @@
+{
+  "actor": {
+    "userId": "alice",
+    "provider": "claude",
+    "sessionId": "session-1"
+  },
+  "intent": {
+    "id": "intent-1",
+    "repoId": "repo-1",
+    "author": {
+      "userId": "alice",
+      "provider": "claude",
+      "sessionId": "session-1"
+    },
+    "summary": "Implement token refresh",
+    "files": ["src/auth.ts"],
+    "symbols": ["refreshToken"],
+    "assumptions": [
+      { "key": "auth.token_storage", "value": "httpOnly-cookie" }
+    ],
+    "status": "active",
+    "createdAt": "2026-07-18T19:00:00.000Z"
+  },
+  "decision": {
+    "id": "decision-1",
+    "repoId": "repo-1",
+    "author": {
+      "userId": "alice",
+      "provider": "claude",
+      "sessionId": "session-1"
+    },
+    "commitSha": "abcdef1234567890",
+    "summary": "Rotate refresh tokens",
+    "rationale": "Limit replay after a token is used",
+    "alternatives": ["Long-lived refresh token"],
+    "assumptions": [
+      { "key": "auth.token_storage", "value": "httpOnly-cookie" }
+    ],
+    "files": ["src/auth.ts"],
+    "symbols": ["refreshToken"],
+    "sessionId": "session-1",
+    "promptHashes": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "createdAt": "2026-07-18T19:00:00.000Z"
+  },
+  "sessionEvent": {
+    "id": "event-1",
+    "sessionId": "session-1",
+    "provider": "claude",
+    "kind": "user_prompt",
+    "content": "Implement rotating refresh tokens",
+    "createdAt": "2026-07-18T18:55:00.000Z"
+  }
+}

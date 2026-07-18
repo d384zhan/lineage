@@ -1,0 +1,108 @@
+[
+  {
+    "version": 1,
+    "id": "message-hello",
+    "repoId": "repo-1",
+    "type": "hello",
+    "sender": { "userId": "alice", "provider": "claude" },
+    "createdAt": "2026-07-18T19:00:00.000Z",
+    "payload": { "roomToken": "room-secret" }
+  },
+  {
+    "version": 1,
+    "id": "message-presence",
+    "repoId": "repo-1",
+    "type": "presence",
+    "sender": { "userId": "alice", "provider": "claude" },
+    "createdAt": "2026-07-18T19:00:00.000Z",
+    "payload": { "status": "online" }
+  },
+  {
+    "version": 1,
+    "id": "message-intent",
+    "repoId": "repo-1",
+    "type": "intent.announce",
+    "sender": { "userId": "alice", "provider": "claude" },
+    "createdAt": "2026-07-18T19:00:00.000Z",
+    "payload": {
+      "id": "intent-1",
+      "repoId": "repo-1",
+      "author": { "userId": "alice", "provider": "claude" },
+      "summary": "Implement token refresh",
+      "files": ["src/auth.ts"],
+      "symbols": ["refreshToken"],
+      "assumptions": [
+        { "key": "auth.token_storage", "value": "httpOnly-cookie" }
+      ],
+      "status": "active",
+      "createdAt": "2026-07-18T19:00:00.000Z"
+    }
+  },
+  {
+    "version": 1,
+    "id": "message-question",
+    "repoId": "repo-1",
+    "type": "question.ask",
+    "sender": { "userId": "bob", "provider": "codex" },
+    "recipient": "alice",
+    "requestId": "request-1",
+    "createdAt": "2026-07-18T19:01:00.000Z",
+    "payload": {
+      "text": "Why rotate refresh tokens?",
+      "evidence": [{ "kind": "file", "value": "src/auth.ts" }]
+    }
+  },
+  {
+    "version": 1,
+    "id": "message-answer",
+    "repoId": "repo-1",
+    "type": "question.answer",
+    "sender": { "userId": "alice", "provider": "claude" },
+    "recipient": "bob",
+    "requestId": "request-1",
+    "createdAt": "2026-07-18T19:02:00.000Z",
+    "payload": {
+      "requestId": "request-1",
+      "mode": "agent",
+      "text": "Rotation limits replay.",
+      "evidence": [{ "kind": "commit", "value": "abcdef1234567890" }]
+    }
+  },
+  {
+    "version": 1,
+    "id": "message-reject",
+    "repoId": "repo-1",
+    "type": "question.reject",
+    "sender": { "userId": "alice", "provider": "claude" },
+    "recipient": "bob",
+    "requestId": "request-2",
+    "createdAt": "2026-07-18T19:02:00.000Z",
+    "payload": { "reason": "Busy" }
+  },
+  {
+    "version": 1,
+    "id": "message-ack",
+    "repoId": "repo-1",
+    "type": "ack",
+    "sender": { "userId": "relay" },
+    "createdAt": "2026-07-18T19:02:00.000Z",
+    "payload": {
+      "messageId": "message-question",
+      "delivered": true,
+      "receivedAt": "2026-07-18T19:02:00.000Z"
+    }
+  },
+  {
+    "version": 1,
+    "id": "message-error",
+    "repoId": "repo-1",
+    "type": "error",
+    "sender": { "userId": "relay" },
+    "createdAt": "2026-07-18T19:02:00.000Z",
+    "payload": {
+      "code": "recipient_offline",
+      "message": "alice is offline",
+      "requestId": "request-3"
+    }
+  }
+]

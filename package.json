@@ -1,0 +1,20 @@
+{
+  "name": "lineage",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lineage": "./packages/cli/src/index.ts"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lineage": "bun packages/cli/src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}

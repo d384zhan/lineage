@@ -1,0 +1,13 @@
+{
+  "name": "@lineage/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lineage": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lineage/commands-history": "workspace:*",
+    "@lineage/contracts": "workspace:*"
+  }
+}
