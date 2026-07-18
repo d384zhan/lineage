@@ -62,6 +62,13 @@ answer/rejection envelope, and `AgentAnswer`. The shared schema rejects a
 mismatched answer ID. An `intent.announce` payload must use the envelope's
 `repoId`.
 
+Two clarifications pinned down by the transport implementation:
+
+- The asker's transport generates the `requestId` inside `ask()`; callers never
+  supply one (`AskInput` has no such field).
+- The relay also acks the `hello` envelope; clients use that ack as the
+  connect-success signal.
+
 After a local `core.announce`, publish its returned `intent` as an
 `intent.announce` envelope. When a remote envelope arrives, pass its payload to
 `core.ingestRemoteIntent`; the returned conflicts are the local warning set.
