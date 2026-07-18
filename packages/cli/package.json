@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@lineage/commands-history": "workspace:*",
+    "@lineage/commands-network": "workspace:*",
     "@lineage/contracts": "workspace:*"
   }
 }

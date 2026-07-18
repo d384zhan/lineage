@@ -1,5 +1,5 @@
 {
-  "name": "@lineage/commands-history",
+  "name": "@lineage/daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,8 +8,10 @@
   },
   "dependencies": {
     "@lineage/contracts": "workspace:*",
-    "@lineage/core": "workspace:*",
     "@lineage/git-store": "workspace:*",
-    "@lineage/prompt-index": "workspace:*"
+    "@lineage/prompt-index": "workspace:*",
+    "@lineage/relay": "workspace:*",
+    "@lineage/transport": "workspace:*",
+    "zod": "latest"
   }
 }

@@ -60,6 +60,13 @@ answer/rejection envelope, and `AgentAnswer`. The shared schema rejects a
 mismatched answer ID. An `intent.announce` payload must use the envelope's
 `repoId`.
 
+Two clarifications pinned down by the transport implementation:
+
+- The asker's transport generates the `requestId` inside `ask()`; callers never
+  supply one (`AskInput` has no such field).
+- The relay also acks the `hello` envelope; clients use that ack as the
+  connect-success signal.
+
 After a local `core.announce`, publish its returned `intent` as an
 `intent.announce` envelope. When a remote envelope arrives, pass its payload to
 `core.ingestRemoteIntent`; the returned conflicts are the local warning set.
@@ -96,18 +103,19 @@ The recipient approval result is one of `agent`, `manual`, or `reject`.
 
 ## History behavior
 
-Lineage does not capture or store raw prompts or transcripts. The agent turns
-relevant context into typed `IntentRecord`, `AgentAnswer`, and `DecisionRecord`
-objects through MCP tools. Questions and answers are transient unless an agent
-or developer explicitly records the result as a decision.
+Lineage never copies raw prompts into Git or its own index. The machine-wide
+private index stores hashes, timestamps, repository identity, touched files,
+and a source-file/line pointer into Claude Code or Codex's native JSONL history.
+This lets old sessions be indexed without requiring the developer to have run
+their agent through Lineage.
 
-The agent bridge may retain recent raw prompts in memory while its process is
-alive. After recipient approval, `AgentAnswer.quotedPrompt` may contain the
-exact originating prompt. This field is transient: it may be displayed and
-routed to the requester, but it must never be written to Git or mirrored into
-MongoDB. When an answer becomes durable, the agent paraphrases it into the
-decision's `summary` and `rationale`. After the session exits or compacts beyond
-the in-memory buffer, exact prompt recovery is not guaranteed.
+For a `path:line` query, Git blame identifies the commit. Lineage ranks local
+prompt pointers using repository identity, tool-touched files, commit time, and
+hashed term overlap. After the recipient explicitly approves an agent answer,
+the daemon rereads the best high-confidence prompt from its native JSONL source.
+`AgentAnswer.quotedPrompt` may carry that prompt back to the requester. It is
+transient and must never be written to Git or the prompt index. Durable history
+contains only the agent's structured summary and rationale.
 
 Current intent is stored in a per-user ref under
 `refs/lineage/intents/<user>-<hash>`. Each update creates a Git commit whose
@@ -118,10 +126,6 @@ intents remain attached to code commits through Git notes.
 `lineage sync` pushes and fetches only `refs/lineage/intents/*` and
 `refs/notes/lineage/*`. The WebSocket transport remains responsible for live
 delivery.
-
-MongoDB Atlas may later mirror these structured objects for cross-repository
-search and change streams. Git remains canonical, and raw prompts are never
-uploaded.
 
 The MVP conflict rule is deterministic: two active intents conflict when an
 assumption key matches case-insensitively and its whitespace-normalized value

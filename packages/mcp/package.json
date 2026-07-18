@@ -1,0 +1,21 @@
+{
+  "name": "@lineage/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tools": "./src/tools.ts"
+  },
+  "dependencies": {
+    "@lineage/contracts": "workspace:*",
+    "@lineage/daemon": "workspace:*",
+    "@lineage/git-store": "workspace:*",
+    "@lineage/prompt-index": "workspace:*",
+    "@modelcontextprotocol/sdk": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@lineage/relay": "workspace:*"
+  }
+}

@@ -6,6 +6,7 @@ import type {
 import { ProviderSchema } from "@lineage/contracts";
 import { DefaultLineageCore } from "@lineage/core";
 import { GitLineageRepository } from "@lineage/git-store";
+import { loadPromptIndex, matchPromptsForLine, readExactPrompt } from "@lineage/prompt-index";
 import { CommandArguments, parseAssumptions } from "./args";
 
 async function withCore<T>(cwd: string, action: (
@@ -122,6 +123,34 @@ export const whyCommand: LineageCommand = {
     const explicit = args.get("path") || args.get("symbol") || args.get("text");
     const fallback = args.positional.join(" ");
     if (!explicit && !fallback) throw new Error("Provide a query or --path/--symbol/--text");
+    const lineSpec = args.get("line") ?? (!explicit && /:\d+$/.test(fallback) ? fallback : undefined);
+    if (lineSpec) {
+      const repository = await GitLineageRepository.open(context.cwd);
+      try {
+        const index = await loadPromptIndex(args.get("index-path"));
+        const result = await matchPromptsForLine(
+          context.cwd,
+          lineSpec,
+          await repository.getRepoId(),
+          index.entries,
+        );
+        const exactPrompt = args.get("exact") === "true" && result.candidates[0]
+          ? await readExactPrompt(result.candidates[0].entry)
+          : undefined;
+        return {
+          trace: result.trace,
+          candidates: result.candidates.map(({ entry, ...candidate }) => ({
+            ...candidate,
+            provider: entry.provider,
+            sessionId: entry.sessionId,
+            timestamp: entry.timestamp,
+          })),
+          ...(exactPrompt ? { exactPrompt } : {}),
+        };
+      } finally {
+        repository.close();
+      }
+    }
     return withCore(context.cwd, (core) =>
       core.why({
         ...(args.get("path") ? { path: args.get("path") } : {}),
