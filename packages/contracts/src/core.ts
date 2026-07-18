@@ -10,7 +10,6 @@ import {
   IntentInputSchema,
   IntentRecordSchema,
   IntentStatusSchema,
-  SessionEventSchema,
   TimelineFilterSchema,
   TimelineResultSchema,
   WhyResultSchema,
@@ -21,7 +20,6 @@ import {
   type IntentConflict,
   type IntentInput,
   type IntentRecord,
-  type SessionEvent,
   type TimelineFilter,
   type TimelineResult,
   type WhyResult,
@@ -29,12 +27,17 @@ import {
 
 export const LinkCommitInputSchema = z.object({
   commitSha: z.string().min(1),
-  sessionId: IdentifierSchema,
   author: ActorSchema,
   rationale: z.string().trim().min(1).optional(),
   alternatives: z.array(z.string()).default([]),
   assumptions: z.array(z.object({ key: z.string(), value: z.string() })).default([]),
   symbols: z.array(z.string()).default([]),
+  evidence: z.array(z.object({
+    kind: z.enum(["commit", "decision", "intent", "file", "symbol", "request", "agent_answer"]),
+    value: z.string().min(1),
+    label: z.string().optional(),
+  })).default([]),
+  sourceRequestId: IdentifierSchema.optional(),
 });
 
 export const UpdateIntentInputSchema = z.object({
@@ -44,10 +47,6 @@ export const UpdateIntentInputSchema = z.object({
 });
 
 export const CoreMethodSchemas = {
-  appendSessionEvent: {
-    input: SessionEventSchema,
-    output: z.void(),
-  },
   announce: {
     input: IntentInputSchema,
     output: AnnounceResultSchema,
@@ -82,7 +81,6 @@ export type LinkCommitInput = z.input<typeof LinkCommitInputSchema>;
 export type UpdateIntentInput = z.input<typeof UpdateIntentInputSchema>;
 
 export interface LineageCore {
-  appendSessionEvent(event: SessionEvent): Promise<void>;
   announce(input: IntentInput): Promise<AnnounceResult>;
   ingestRemoteIntent(intent: IntentRecord): Promise<IntentConflict[]>;
   updateIntent(input: UpdateIntentInput): Promise<IntentRecord>;

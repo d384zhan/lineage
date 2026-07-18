@@ -7,17 +7,23 @@ export interface GitResult {
 export async function runGit(
   cwd: string,
   args: readonly string[],
-  options: { allowFailure?: boolean } = {},
+  options: {
+    allowFailure?: boolean;
+    input?: string;
+    env?: Record<string, string>;
+  } = {},
 ): Promise<GitResult> {
-  const process = Bun.spawn(["git", ...args], {
+  const child = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
+    stdin: options.input === undefined ? "ignore" : new Blob([options.input]),
+    env: { ...globalThis.process.env, ...options.env },
   });
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
   ]);
   if (exitCode !== 0 && !options.allowFailure) {
     throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`);

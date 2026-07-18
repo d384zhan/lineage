@@ -2,7 +2,6 @@ import type {
   DecisionRecord,
   HistoryQuery,
   IntentRecord,
-  SessionEvent,
   TimelineFilter,
 } from "@lineage/contracts";
 
@@ -12,8 +11,6 @@ export interface SaveIntentOptions {
 
 export interface LineageStore {
   getRepoId(): Promise<string>;
-  appendSessionEvent(event: SessionEvent): Promise<void>;
-  getSessionEvents(sessionId: string): Promise<SessionEvent[]>;
   saveIntent(intent: IntentRecord, options?: SaveIntentOptions): Promise<void>;
   getIntent(intentId: string): Promise<IntentRecord | undefined>;
   listIntents(filter?: TimelineFilter): Promise<IntentRecord[]>;

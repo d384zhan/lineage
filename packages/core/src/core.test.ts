@@ -3,7 +3,6 @@ import type {
   DecisionRecord,
   HistoryQuery,
   IntentRecord,
-  SessionEvent,
   TimelineFilter,
 } from "@lineage/contracts";
 import { DefaultLineageCore } from "./core";
@@ -14,15 +13,10 @@ import type {
 } from "./store";
 
 class MemoryStore implements LineageStore {
-  events: SessionEvent[] = [];
   intents: IntentRecord[] = [];
   decisions: DecisionRecord[] = [];
 
   async getRepoId() { return "repo-1"; }
-  async appendSessionEvent(event: SessionEvent) { this.events.push(event); }
-  async getSessionEvents(sessionId: string) {
-    return this.events.filter((event) => event.sessionId === sessionId);
-  }
   async saveIntent(intent: IntentRecord, _options?: SaveIntentOptions) {
     this.intents = [...this.intents.filter((item) => item.id !== intent.id), intent];
   }
@@ -98,7 +92,7 @@ describe("DefaultLineageCore", () => {
     expect(result.conflicts).toHaveLength(0);
   });
 
-  test("hashes prompts without copying raw content into a decision", async () => {
+  test("links structured intent without storing raw prompts", async () => {
     const { core, store } = createCore();
     await core.announce({
       repoId: "repo-1",
@@ -108,23 +102,18 @@ describe("DefaultLineageCore", () => {
       symbols: ["refreshToken"],
       assumptions: [{ key: "auth.storage", value: "cookie" }],
     });
-    await core.appendSessionEvent({
-      id: "event-1",
-      sessionId: "session-1",
-      provider: "claude",
-      kind: "user_prompt",
-      content: "secret raw prompt",
-      createdAt: "2026-07-18T18:00:00.000Z",
-    });
     const decision = await core.linkCommit({
       commitSha: "abcdef1234567890",
-      sessionId: "session-1",
-      author: { userId: "alice", provider: "claude" },
+      author: { userId: "alice", provider: "claude", sessionId: "session-1" },
+      evidence: [{ kind: "agent_answer", value: "answer-1" }],
     });
-    expect(decision.promptHashes[0]).toHaveLength(64);
     expect(decision.assumptions).toEqual([{ key: "auth.storage", value: "cookie" }]);
     expect(decision.symbols).toEqual(["refreshToken"]);
+    expect(decision.evidence).toEqual([
+      { kind: "commit", value: "abcdef1234567890" },
+      { kind: "intent", value: "id-1" },
+      { kind: "agent_answer", value: "answer-1" },
+    ]);
     expect(store.intents[0]?.status).toBe("completed");
-    expect(JSON.stringify(store.decisions)).not.toContain("secret raw prompt");
   });
 });

@@ -46,17 +46,8 @@ export const DecisionRecordSchema = z.object({
   assumptions: z.array(AssumptionSchema),
   files: z.array(z.string()),
   symbols: z.array(z.string()),
-  sessionId: IdentifierSchema.optional(),
-  promptHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
-  createdAt: UtcTimestampSchema,
-});
-
-export const SessionEventSchema = z.object({
-  id: IdentifierSchema,
-  sessionId: IdentifierSchema,
-  provider: ProviderSchema,
-  kind: z.enum(["user_prompt", "assistant_output", "tool_call"]),
-  content: z.string(),
+  evidence: z.array(z.lazy(() => EvidenceRefSchema)),
+  sourceRequestId: IdentifierSchema.optional(),
   createdAt: UtcTimestampSchema,
 });
 
@@ -67,7 +58,8 @@ export const EvidenceRefSchema = z.object({
     "intent",
     "file",
     "symbol",
-    "prompt_hash",
+    "request",
+    "agent_answer",
   ]),
   value: z.string().min(1),
   label: z.string().optional(),
@@ -146,7 +138,6 @@ export type Assumption = z.infer<typeof AssumptionSchema>;
 export type IntentStatus = z.infer<typeof IntentStatusSchema>;
 export type IntentRecord = z.infer<typeof IntentRecordSchema>;
 export type DecisionRecord = z.infer<typeof DecisionRecordSchema>;
-export type SessionEvent = z.infer<typeof SessionEventSchema>;
 export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
 export type IntentConflict = z.infer<typeof IntentConflictSchema>;
 export type IntentInput = z.input<typeof IntentInputSchema>;

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   DecisionInputSchema,
   DecisionRecordSchema,
@@ -6,7 +5,6 @@ import {
   IntentInputSchema,
   IntentRecordSchema,
   LinkCommitInputSchema,
-  SessionEventSchema,
   TimelineFilterSchema,
   UpdateIntentInputSchema,
   type AnnounceResult,
@@ -18,7 +16,6 @@ import {
   type IntentRecord,
   type LineageCore,
   type LinkCommitInput,
-  type SessionEvent,
   type TimelineFilter,
   type TimelineResult,
   type UpdateIntentInput,
@@ -45,10 +42,6 @@ export class DefaultLineageCore implements LineageCore {
     this.commitInspector = options.commitInspector;
     this.now = options.now ?? (() => new Date().toISOString());
     this.id = options.id ?? (() => crypto.randomUUID());
-  }
-
-  async appendSessionEvent(event: SessionEvent): Promise<void> {
-    await this.store.appendSessionEvent(SessionEventSchema.parse(event));
   }
 
   async announce(input: IntentInput): Promise<AnnounceResult> {
@@ -97,17 +90,13 @@ export class DefaultLineageCore implements LineageCore {
   async linkCommit(input: LinkCommitInput): Promise<DecisionRecord> {
     const parsed = LinkCommitInputSchema.parse(input);
     const commit = await this.commitInspector.inspectCommit(parsed.commitSha);
-    const events = await this.store.getSessionEvents(parsed.sessionId);
     const relevantIntents = (await this.store.listIntents({ limit: 500 })).filter(
       (intent) =>
         intent.status === "active" &&
         intent.author.userId === parsed.author.userId &&
-        (intent.author.sessionId === parsed.sessionId ||
+        ((parsed.author.sessionId && intent.author.sessionId === parsed.author.sessionId) ||
           intent.files.some((file) => commit.files.includes(file))),
     );
-    const promptHashes = events
-      .filter((event) => event.kind === "user_prompt")
-      .map((event) => createHash("sha256").update(event.content).digest("hex"));
     const rationale = parsed.rationale ?? (commit.body.trim() || commit.summary);
     const assumptions = mergeByKey(
       parsed.assumptions,
@@ -130,8 +119,16 @@ export class DefaultLineageCore implements LineageCore {
       assumptions,
       files: commit.files,
       symbols,
-      sessionId: parsed.sessionId,
-      promptHashes,
+      evidence: mergeEvidence(parsed.evidence, [
+        { kind: "commit", value: commit.commitSha },
+        ...relevantIntents.map((intent) => ({
+          kind: "intent" as const,
+          value: intent.id,
+        })),
+      ]),
+      ...(parsed.sourceRequestId
+        ? { sourceRequestId: parsed.sourceRequestId }
+        : {}),
     });
     await Promise.all(
       relevantIntents.map((intent) =>
@@ -193,6 +190,16 @@ function mergeByKey<T extends { key: string }>(
   const merged = new Map<string, T>();
   for (const item of fallback) merged.set(item.key.toLowerCase(), item);
   for (const item of preferred) merged.set(item.key.toLowerCase(), item);
+  return [...merged.values()];
+}
+
+function mergeEvidence<T extends { kind: string; value: string }>(
+  preferred: readonly T[],
+  fallback: readonly T[],
+): T[] {
+  const merged = new Map<string, T>();
+  for (const item of fallback) merged.set(`${item.kind}:${item.value}`, item);
+  for (const item of preferred) merged.set(`${item.kind}:${item.value}`, item);
   return [...merged.values()];
 }
 

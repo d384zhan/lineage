@@ -155,7 +155,3 @@ export interface LineageTransport {
   subscribe(handler: MessageHandler): () => void;
   close(): Promise<void>;
 }
-
-export interface SessionEventSink {
-  appendSessionEvent(event: import("./domain").SessionEvent): Promise<void>;
-}

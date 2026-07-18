@@ -38,18 +38,9 @@
     ],
     "files": ["src/auth.ts"],
     "symbols": ["refreshToken"],
-    "sessionId": "session-1",
-    "promptHashes": [
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "evidence": [
+      { "kind": "commit", "value": "abcdef1234567890" }
     ],
     "createdAt": "2026-07-18T19:00:00.000Z"
-  },
-  "sessionEvent": {
-    "id": "event-1",
-    "sessionId": "session-1",
-    "provider": "claude",
-    "kind": "user_prompt",
-    "content": "Implement rotating refresh tokens",
-    "createdAt": "2026-07-18T18:55:00.000Z"
   }
 }

@@ -30,7 +30,7 @@ async function createRepository(): Promise<string> {
 }
 
 describe("GitLineageRepository", () => {
-  test("persists raw prompts locally and approved decisions in Git notes", async () => {
+  test("stores current intent in a Git ref and approved decisions in Git notes", async () => {
     const root = await createRepository();
     const repository = await GitLineageRepository.initialize(root);
     const core = new DefaultLineageCore({
@@ -40,30 +40,37 @@ describe("GitLineageRepository", () => {
       id: () => "decision-1",
     });
 
-    await core.appendSessionEvent({
-      id: "event-1",
-      sessionId: "session-1",
-      provider: "claude",
-      kind: "user_prompt",
-      content: "private exact prompt",
-      createdAt: "2026-07-18T18:00:00.000Z",
+    await core.announce({
+      repoId: await repository.getRepoId(),
+      author: { userId: "alice", provider: "claude", sessionId: "session-1" },
+      summary: "Use secure cookie storage",
+      files: ["auth.ts"],
+      symbols: ["storage"],
+      assumptions: [{ key: "auth.storage", value: "cookie" }],
     });
     const decision = await core.linkCommit({
       commitSha: "HEAD",
-      sessionId: "session-1",
-      author: { userId: "alice", provider: "claude" },
-      assumptions: [{ key: "auth.storage", value: "cookie" }],
+      author: { userId: "alice", provider: "claude", sessionId: "session-1" },
     });
 
     expect(decision.summary).toBe("Implement token storage");
     expect(decision.rationale).toBe("Keep tokens out of JavaScript");
     expect(decision.files).toEqual(["auth.ts"]);
-    expect(decision.promptHashes).toHaveLength(1);
+    expect(decision.assumptions).toEqual([{ key: "auth.storage", value: "cookie" }]);
+    expect(decision.evidence.some((item) => item.kind === "intent")).toBeTrue();
     repository.close();
 
     const note = await runGit(root, ["notes", `--ref=${DECISIONS_NOTES_REF}`, "show", "HEAD"]);
     expect(note.stdout).toContain("Keep tokens out of JavaScript");
-    expect(note.stdout).not.toContain("private exact prompt");
+    expect(note.stdout).not.toContain("promptHashes");
+
+    const intentRefs = await runGit(root, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/lineage/intents/",
+    ]);
+    expect(intentRefs.stdout).toContain("refs/lineage/intents/alice-");
+    expect(await Bun.file(join(repository.gitDirectory, "lineage/lineage.sqlite")).exists()).toBeFalse();
 
     const reopened = await GitLineageRepository.open(root);
     const result = await reopened.findDecisions({ path: "auth.ts" });
@@ -103,5 +110,39 @@ describe("GitLineageRepository", () => {
       "HEAD",
     ]);
     expect(note.stdout).toContain("Change token storage");
+  });
+
+  test("sync pushes only Lineage refs to origin", async () => {
+    const root = await createRepository();
+    const remote = await mkdtemp(join(tmpdir(), "lineage-remote-"));
+    temporaryDirectories.push(remote);
+    await runGit(remote, ["init", "--bare"]);
+    await runGit(root, ["remote", "add", "origin", remote]);
+
+    const repository = await GitLineageRepository.initialize(root);
+    const core = new DefaultLineageCore({
+      store: repository,
+      commitInspector: repository,
+      now: () => "2026-07-18T19:00:00.000Z",
+      id: () => "intent-sync",
+    });
+    await core.announce({
+      repoId: await repository.getRepoId(),
+      author: { userId: "alice" },
+      summary: "Synchronize intent",
+      files: ["auth.ts"],
+      symbols: [],
+      assumptions: [],
+    });
+    const result = await repository.sync("push");
+    repository.close();
+
+    expect(result.pushed.some((reference) => reference.startsWith("refs/lineage/intents/"))).toBeTrue();
+    const remoteRefs = await runGit(remote, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/lineage/intents/",
+    ]);
+    expect(remoteRefs.stdout).toContain("refs/lineage/intents/alice-");
   });
 });

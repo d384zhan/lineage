@@ -8,6 +8,7 @@ export const LINEAGE_PROVIDER_ENV = "LINEAGE_PROVIDER";
 
 export const MCP_TOOL_NAMES = {
   announce: "lineage_announce",
+  recordDecision: "lineage_record_decision",
   ask: "lineage_ask",
   reply: "lineage_reply",
   why: "lineage_why",

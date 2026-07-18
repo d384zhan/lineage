@@ -15,7 +15,6 @@ import {
   type LineageTransport,
   type LinkCommitInput,
   type MessageHandler,
-  type SessionEvent,
   type TimelineFilter,
   type TimelineResult,
   type UpdateIntentInput,
@@ -24,7 +23,6 @@ import {
 } from "./index";
 
 const NOW = "2026-07-18T19:00:00.000Z";
-const HASH = "a".repeat(64);
 
 export function fixtureActor(overrides: Partial<Actor> = {}): Actor {
   return { userId: "alice", provider: "claude", sessionId: "session-1", ...overrides };
@@ -61,8 +59,7 @@ export function fixtureDecision(
     assumptions: [{ key: "auth.token_storage", value: "httpOnly-cookie" }],
     files: ["src/auth.ts"],
     symbols: ["refreshToken"],
-    sessionId: "session-1",
-    promptHashes: [HASH],
+    evidence: [{ kind: "commit", value: "abcdef1234567890" }],
     createdAt: NOW,
     ...overrides,
   };
@@ -73,10 +70,6 @@ export class MockLineageCore implements LineageCore {
   intent = fixtureIntent();
   decision = fixtureDecision();
   conflicts: IntentConflict[] = [];
-
-  async appendSessionEvent(event: SessionEvent): Promise<void> {
-    this.calls.push({ method: "appendSessionEvent", input: event });
-  }
 
   async announce(input: IntentInput): Promise<AnnounceResult> {
     this.calls.push({ method: "announce", input });

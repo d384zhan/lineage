@@ -97,12 +97,18 @@ export const linkCommitCommand: LineageCommand = {
     return withCore(context.cwd, (core) =>
       core.linkCommit({
         commitSha: args.get("commit") ?? "HEAD",
-        sessionId: args.require("session"),
         author: actorFrom(args),
         ...(args.get("rationale") ? { rationale: args.get("rationale") } : {}),
         alternatives: args.all("alternative"),
         assumptions: parseAssumptions(args.all("assume")),
         symbols: args.all("symbol"),
+        evidence: args.all("evidence").map((value) => ({
+          kind: "agent_answer" as const,
+          value,
+        })),
+        ...(args.get("request")
+          ? { sourceRequestId: args.get("request") }
+          : {}),
       }),
     );
   },
@@ -144,6 +150,24 @@ export const timelineCommand: LineageCommand = {
   },
 };
 
+export const syncCommand: LineageCommand = {
+  name: "sync",
+  description: "Push or fetch Lineage Git refs through origin",
+  async run(rawArgs, context) {
+    const args = new CommandArguments(rawArgs);
+    const requested = args.get("mode") ?? "both";
+    if (requested !== "pull" && requested !== "push" && requested !== "both") {
+      throw new Error("--mode must be pull, push, or both");
+    }
+    const repository = await GitLineageRepository.open(context.cwd);
+    try {
+      return await repository.sync(requested);
+    } finally {
+      repository.close();
+    }
+  },
+};
+
 export const historyCommands: readonly LineageCommand[] = [
   initCommand,
   announceCommand,
@@ -151,4 +175,5 @@ export const historyCommands: readonly LineageCommand[] = [
   linkCommitCommand,
   whyCommand,
   timelineCommand,
+  syncCommand,
 ];

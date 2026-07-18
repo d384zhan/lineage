@@ -1,24 +1,21 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { Database } from "bun:sqlite";
 import {
   DECISIONS_NOTES_REF,
   DecisionRecordSchema,
   INTENTS_NOTES_REF,
+  INTENTS_REFS_PREFIX,
   IntentRecordSchema,
-  LINEAGE_GIT_DIRECTORY,
   LINEAGE_PROVIDER_ENV,
   LINEAGE_REPOSITORY_CONFIG,
-  LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   PROTOCOL_VERSION,
   RepositoryConfigSchema,
-  SessionEventSchema,
   type DecisionRecord,
   type HistoryQuery,
   type IntentRecord,
   type RepositoryConfig,
-  type SessionEvent,
   type TimelineFilter,
 } from "@lineage/contracts";
 import type {
@@ -32,20 +29,16 @@ import { findRepositoryRoot, runGit } from "./git";
 export class GitLineageRepository implements LineageStore, CommitInspector {
   readonly root: string;
   readonly gitDirectory: string;
-  private readonly database: Database;
   private readonly config: RepositoryConfig;
 
   private constructor(
     root: string,
     gitDirectory: string,
-    database: Database,
     config: RepositoryConfig,
   ) {
     this.root = root;
     this.gitDirectory = gitDirectory;
-    this.database = database;
     this.config = config;
-    this.initializeSchema();
   }
 
   static async initialize(cwd: string): Promise<GitLineageRepository> {
@@ -60,7 +53,7 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
       await mkdir(dirname(configPath), { recursive: true });
       await Bun.write(configPath, `${JSON.stringify(config, null, 2)}\n`);
     }
-    await configureNotes(root);
+    await configureLineageRefs(root);
     await installPostCommitHook(root);
     return GitLineageRepository.open(root);
   }
@@ -76,83 +69,65 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
     const gitDirectory = isAbsolute(rawGitDirectory)
       ? rawGitDirectory
       : resolve(root, rawGitDirectory);
-    const lineageDirectory = join(gitDirectory, LINEAGE_GIT_DIRECTORY);
-    await mkdir(lineageDirectory, { recursive: true });
-    const database = new Database(join(lineageDirectory, "lineage.sqlite"), {
-      create: true,
-    });
-    return new GitLineageRepository(root, gitDirectory, database, config);
+    return new GitLineageRepository(root, gitDirectory, config);
   }
 
   close(): void {
-    this.database.close();
+    // Git owns all durable state; there is no local database handle to close.
+  }
+
+  async sync(mode: "pull" | "push" | "both" = "both"): Promise<{
+    pushed: string[];
+    pulled: boolean;
+  }> {
+    const origin = await runGit(this.root, ["remote", "get-url", "origin"], {
+      allowFailure: true,
+    });
+    if (origin.exitCode !== 0) throw new Error("Lineage sync requires an origin remote");
+
+    const pushed: string[] = [];
+    if (mode === "push" || mode === "both") {
+      const refs = await this.listLineageRefs();
+      if (refs.length > 0) {
+        await runGit(this.root, [
+          "push",
+          "origin",
+          ...refs.map((reference) => `${reference}:${reference}`),
+        ]);
+        pushed.push(...refs);
+      }
+    }
+    if (mode === "pull" || mode === "both") {
+      await runGit(this.root, [
+        "fetch",
+        "origin",
+        "+refs/lineage/intents/*:refs/lineage/intents/*",
+        "+refs/notes/lineage/*:refs/notes/lineage/*",
+      ]);
+    }
+    return { pushed, pulled: mode === "pull" || mode === "both" };
   }
 
   async getRepoId(): Promise<string> {
     return this.config.repoId;
   }
 
-  async appendSessionEvent(event: SessionEvent): Promise<void> {
-    const parsed = SessionEventSchema.parse(event);
-    this.database
-      .query(`
-        INSERT INTO session_events (id, session_id, provider, kind, content, created_at)
-        VALUES ($id, $sessionId, $provider, $kind, $content, $createdAt)
-        ON CONFLICT(id) DO NOTHING
-      `)
-      .run({
-        $id: parsed.id,
-        $sessionId: parsed.sessionId,
-        $provider: parsed.provider,
-        $kind: parsed.kind,
-        $content: parsed.content,
-        $createdAt: parsed.createdAt,
-      });
-  }
-
-  async getSessionEvents(sessionId: string): Promise<SessionEvent[]> {
-    const rows = this.database
-      .query("SELECT record_json FROM session_events_view WHERE session_id = ? ORDER BY created_at")
-      .all(sessionId) as Array<{ record_json: string }>;
-    return rows.map((row) => SessionEventSchema.parse(JSON.parse(row.record_json)));
-  }
-
   async saveIntent(intent: IntentRecord, options: SaveIntentOptions = {}): Promise<void> {
     const parsed = IntentRecordSchema.parse(intent);
-    this.database
-      .query(`
-        INSERT INTO intents (id, repo_id, status, created_at, record_json)
-        VALUES ($id, $repoId, $status, $createdAt, $record)
-        ON CONFLICT(id) DO UPDATE SET
-          status = excluded.status,
-          record_json = excluded.record_json
-      `)
-      .run({
-        $id: parsed.id,
-        $repoId: parsed.repoId,
-        $status: parsed.status,
-        $createdAt: parsed.createdAt,
-        $record: JSON.stringify(parsed),
-      });
+    await this.writeIntentRef(parsed);
     if (options.commitSha && parsed.status !== "active") {
       await this.appendNote(INTENTS_NOTES_REF, options.commitSha, parsed, IntentRecordSchema);
     }
   }
 
   async getIntent(intentId: string): Promise<IntentRecord | undefined> {
-    const row = this.database
-      .query("SELECT record_json FROM intents WHERE id = ?")
-      .get(intentId) as { record_json: string } | null;
-    return row ? IntentRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
+    return (await this.listCurrentIntents()).find((intent) => intent.id === intentId);
   }
 
   async listIntents(filter: TimelineFilter = {}): Promise<IntentRecord[]> {
-    const rows = this.database
-      .query("SELECT record_json FROM intents ORDER BY created_at DESC")
-      .all() as Array<{ record_json: string }>;
-    return rows
-      .map((row) => IntentRecordSchema.parse(JSON.parse(row.record_json)))
+    return (await this.listCurrentIntents())
       .filter((intent) => matchesTimeline(intent.files, intent.symbols, filter))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, filter.limit ?? 50);
   }
 
@@ -211,41 +186,59 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
     };
   }
 
-  private initializeSchema(): void {
-    this.database.exec(`
-      PRAGMA journal_mode = WAL;
-      CREATE TABLE IF NOT EXISTS session_events (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS session_events_session
-        ON session_events(session_id, created_at);
-      CREATE VIEW IF NOT EXISTS session_events_view AS
-        SELECT
-          session_id,
-          created_at,
-          json_object(
-            'id', id,
-            'sessionId', session_id,
-            'provider', provider,
-            'kind', kind,
-            'content', content,
-            'createdAt', created_at
-          ) AS record_json
-        FROM session_events;
-      CREATE TABLE IF NOT EXISTS intents (
-        id TEXT PRIMARY KEY,
-        repo_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        record_json TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS intents_status ON intents(status, created_at);
-    `);
+  private async writeIntentRef(intent: IntentRecord): Promise<void> {
+    const reference = intentReference(intent.author.userId);
+    const parentResult = await runGit(
+      this.root,
+      ["rev-parse", "--verify", reference],
+      { allowFailure: true },
+    );
+    const parent = parentResult.exitCode === 0 ? parentResult.stdout.trim() : undefined;
+    const emptyTree = (await runGit(this.root, ["mktree"], { input: "" })).stdout.trim();
+    const timestamp = Math.floor(Date.parse(intent.createdAt) / 1000);
+    const commit = [
+      `tree ${emptyTree}`,
+      ...(parent ? [`parent ${parent}`] : []),
+      `author Lineage <lineage@local> ${timestamp} +0000`,
+      `committer Lineage <lineage@local> ${timestamp} +0000`,
+      "",
+      JSON.stringify(intent),
+      "",
+    ].join("\n");
+    const objectId = (
+      await runGit(this.root, ["hash-object", "-t", "commit", "-w", "--stdin"], {
+        input: commit,
+      })
+    ).stdout.trim();
+    await runGit(
+      this.root,
+      ["update-ref", reference, objectId, ...(parent ? [parent] : [])],
+    );
+  }
+
+  private async listCurrentIntents(): Promise<IntentRecord[]> {
+    const refs = await runGit(
+      this.root,
+      ["for-each-ref", "--format=%(refname)", `${INTENTS_REFS_PREFIX}/`],
+      { allowFailure: true },
+    );
+    const names = refs.stdout.split("\n").map((value) => value.trim()).filter(Boolean);
+    return Promise.all(names.map((reference) => this.readIntentRef(reference)));
+  }
+
+  private async listLineageRefs(): Promise<string[]> {
+    const refs = await runGit(this.root, [
+      "for-each-ref",
+      "--format=%(refname)",
+      `${INTENTS_REFS_PREFIX}/`,
+      "refs/notes/lineage/",
+    ]);
+    return refs.stdout.split("\n").map((value) => value.trim()).filter(Boolean);
+  }
+
+  private async readIntentRef(reference: string): Promise<IntentRecord> {
+    const result = await runGit(this.root, ["show", "-s", "--format=%B", reference]);
+    return IntentRecordSchema.parse(JSON.parse(result.stdout));
   }
 
   private async appendNote<T extends { id: string }>(
@@ -304,7 +297,13 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
   }
 }
 
-async function configureNotes(root: string): Promise<void> {
+function intentReference(userId: string): string {
+  const slug = userId.toLowerCase().replaceAll(/[^a-z0-9._-]+/g, "-").replaceAll(/^-|-$/g, "") || "user";
+  const suffix = createHash("sha256").update(userId).digest("hex").slice(0, 8);
+  return `${INTENTS_REFS_PREFIX}/${slug}-${suffix}`;
+}
+
+async function configureLineageRefs(root: string): Promise<void> {
   const displayRefs = await runGit(root, ["config", "--get-all", "notes.displayRef"], {
     allowFailure: true,
   });
@@ -318,14 +317,17 @@ async function configureNotes(root: string): Promise<void> {
   const origin = await runGit(root, ["remote", "get-url", "origin"], {
     allowFailure: true,
   });
-  if (origin.exitCode === 0) {
-    const fetchRule = "+refs/notes/lineage/*:refs/notes/lineage/*";
-    const rules = await runGit(root, ["config", "--get-all", "remote.origin.fetch"], {
-      allowFailure: true,
-    });
-    if (!rules.stdout.split("\n").includes(fetchRule)) {
-      await runGit(root, ["config", "--add", "remote.origin.fetch", fetchRule]);
-    }
+  if (origin.exitCode !== 0) return;
+  const desiredRules = [
+    "+refs/notes/lineage/*:refs/notes/lineage/*",
+    "+refs/lineage/intents/*:refs/lineage/intents/*",
+  ];
+  const rules = await runGit(root, ["config", "--get-all", "remote.origin.fetch"], {
+    allowFailure: true,
+  });
+  const existing = new Set(rules.stdout.split("\n").filter(Boolean));
+  for (const rule of desiredRules) {
+    if (!existing.has(rule)) await runGit(root, ["config", "--add", "remote.origin.fetch", rule]);
   }
 }
 
@@ -340,8 +342,8 @@ async function installPostCommitHook(root: string): Promise<void> {
   if (current.includes("# lineage:start")) return;
   const block = [
     "# lineage:start",
-    `if [ -n "\${${LINEAGE_SESSION_ID_ENV}:-}" ] && command -v lineage >/dev/null 2>&1; then`,
-    `  lineage link-commit --commit HEAD --session "\$${LINEAGE_SESSION_ID_ENV}" --user "\${${LINEAGE_USER_ID_ENV}:-unknown}" --provider "\${${LINEAGE_PROVIDER_ENV}:-claude}" >/dev/null 2>&1 || true`,
+    `if [ -n "\${${LINEAGE_USER_ID_ENV}:-}" ] && command -v lineage >/dev/null 2>&1; then`,
+    `  lineage link-commit --commit HEAD --user "\$${LINEAGE_USER_ID_ENV}" --provider "\${${LINEAGE_PROVIDER_ENV}:-claude}" >/dev/null 2>&1 || true`,
     "fi",
     "# lineage:end",
     "",

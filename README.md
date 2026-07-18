@@ -21,7 +21,7 @@ bun run typecheck
 
 - `packages/contracts`: shared, versioned schemas and interfaces
 - `packages/core`: decision, intent, and conflict behavior
-- `packages/git-store`: SQLite session storage and Git notes persistence
+- `packages/git-store`: per-user intent refs and Git notes persistence
 - `packages/commands-history`: Person 1 command implementations
 - `packages/cli`: CLI dispatcher for the implemented history commands
 

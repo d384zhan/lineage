@@ -14,9 +14,7 @@ packages.
 The only required integration points are:
 
 - Person 2 implements `LineageTransport`.
-- Person 2's MCP server calls `LineageCore` instead of reading SQLite or Git.
-- Person 2's wrapper sends normalized `SessionEvent` objects to
-  `SessionEventSink`.
+- Person 2's MCP server calls `LineageCore` instead of reading Git directly.
 - Person 2 exports network commands as `LineageCommand[]` for the root CLI to
   register.
 
@@ -28,7 +26,7 @@ Person 2 can obtain the real implementation without constructing storage:
 import { openGitLineageRuntime } from "@lineage/git-store";
 
 const runtime = await openGitLineageRuntime(process.cwd());
-// runtime.core implements LineageCore and SessionEventSink
+// runtime.core implements LineageCore
 // runtime.repoId is used by the relay connection
 ```
 
@@ -87,6 +85,7 @@ which question was answered.
 The fixed MCP tool names are exported as `MCP_TOOL_NAMES`:
 
 - `lineage_announce`
+- `lineage_record_decision`
 - `lineage_ask`
 - `lineage_reply`
 - `lineage_why`
@@ -97,10 +96,24 @@ The recipient approval result is one of `agent`, `manual`, or `reject`.
 
 ## History behavior
 
-Raw `SessionEvent.content` is stored only in
-`.git/lineage/lineage.sqlite`. Git notes contain approved `DecisionRecord` and
-completed `IntentRecord` objects. Prompt content is represented by SHA-256
-hashes.
+Lineage does not capture or store raw prompts or transcripts. The agent turns
+relevant context into typed `IntentRecord`, `AgentAnswer`, and `DecisionRecord`
+objects through MCP tools. Questions and answers are transient unless an agent
+or developer explicitly records the result as a decision.
+
+Current intent is stored in a per-user ref under
+`refs/lineage/intents/<user>-<hash>`. Each update creates a Git commit whose
+parent is the user's previous intent, giving the ref its own append-only
+chronology without touching the code branch. Approved decisions and completed
+intents remain attached to code commits through Git notes.
+
+`lineage sync` pushes and fetches only `refs/lineage/intents/*` and
+`refs/notes/lineage/*`. The WebSocket transport remains responsible for live
+delivery.
+
+MongoDB Atlas may later mirror these structured objects for cross-repository
+search and change streams. Git remains canonical, and raw prompts are never
+uploaded.
 
 The MVP conflict rule is deterministic: two active intents conflict when an
 assumption key matches case-insensitively and its whitespace-normalized value

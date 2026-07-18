@@ -6,7 +6,6 @@ import {
   DecisionRecordSchema,
   IntentRecordSchema,
   PROTOCOL_VERSION,
-  SessionEventSchema,
   WireEnvelopeSchema,
   renderInboundAgentRequest,
 } from "./index";
@@ -16,8 +15,7 @@ describe("shared contract fixtures", () => {
   test("domain fixtures parse", () => {
     expect(ActorSchema.parse(domainFixture.actor).userId).toBe("alice");
     expect(IntentRecordSchema.parse(domainFixture.intent).status).toBe("active");
-    expect(DecisionRecordSchema.parse(domainFixture.decision).promptHashes).toHaveLength(1);
-    expect(SessionEventSchema.parse(domainFixture.sessionEvent).kind).toBe("user_prompt");
+    expect(DecisionRecordSchema.parse(domainFixture.decision).evidence).toHaveLength(1);
   });
 
   test("every wire message type has a valid fixture", () => {
