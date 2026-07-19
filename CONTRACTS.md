@@ -32,7 +32,7 @@ const runtime = await openGitLineageRuntime(process.cwd());
 
 ## Repository identity
 
-`lineage init` generates `.lineage/repo.json`:
+`lineage init` writes `<git-dir>/lineage/repo.json`:
 
 ```json
 {
@@ -41,9 +41,17 @@ const runtime = await openGitLineageRuntime(process.cwd());
 }
 ```
 
-The committed `repoId` is the relay room identifier. Every intent and wire
-message must contain this exact ID. Secrets and relay URLs must remain under
-`.git/lineage` and must not be committed.
+The `repoId` is the relay room identifier. By default it is a stable hash of
+the normalized Git `origin`, so `git@host:owner/repo.git` and
+`https://host/owner/repo.git` derive the same value independently. Repositories
+without an origin fall back to the first commit or an explicit `--repo-id`.
+Every intent and wire message must contain this exact ID. Repository identity,
+secrets, and relay URLs remain under `.git/lineage` and are never committed.
+
+Initialization also registers the Lineage stdio MCP server through each
+installed provider's supported CLI. Claude uses local project scope; Codex uses
+its user MCP configuration. This setup is idempotent and creates no project
+configuration file. `lineage run` is optional after initialization.
 
 ## Wire protocol
 

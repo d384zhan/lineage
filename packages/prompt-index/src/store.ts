@@ -1,5 +1,10 @@
 import { chmod, mkdir, readdir, rename } from "node:fs/promises";
 import { dirname, join, parse } from "node:path";
+import {
+  LINEAGE_GIT_DIRECTORY,
+  LINEAGE_LEGACY_REPOSITORY_CONFIG,
+  LINEAGE_REPOSITORY_CONFIG,
+} from "@lineage/contracts";
 import { parseTranscript } from "./providers";
 import type { PromptIndexEntry, PromptIndexFile } from "./types";
 
@@ -46,7 +51,11 @@ async function repoIdForCwd(cwd: string): Promise<string | undefined> {
   const root = parse(current).root;
   for (;;) {
     try {
-      const config = await Bun.file(join(current, ".lineage", "repo.json")).json() as { repoId?: unknown };
+      const localPath = join(current, ".git", LINEAGE_GIT_DIRECTORY, LINEAGE_REPOSITORY_CONFIG);
+      const legacyPath = join(current, LINEAGE_LEGACY_REPOSITORY_CONFIG);
+      const local = Bun.file(localPath);
+      const source = await local.exists() ? local : Bun.file(legacyPath);
+      const config = await source.json() as { repoId?: unknown };
       if (typeof config.repoId === "string") return config.repoId;
     } catch {
       // Continue toward the filesystem root.

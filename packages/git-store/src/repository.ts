@@ -8,6 +8,8 @@ import {
   INTENTS_REFS_PREFIX,
   IntentRecordSchema,
   LINEAGE_PROVIDER_ENV,
+  LINEAGE_GIT_DIRECTORY,
+  LINEAGE_LEGACY_REPOSITORY_CONFIG,
   LINEAGE_REPOSITORY_CONFIG,
   LINEAGE_USER_ID_ENV,
   PROTOCOL_VERSION,
@@ -41,17 +43,28 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
     this.config = config;
   }
 
-  static async initialize(cwd: string): Promise<GitLineageRepository> {
+  static async initialize(
+    cwd: string,
+    options: { repoId?: string } = {},
+  ): Promise<GitLineageRepository> {
     const root = await findRepositoryRoot(cwd);
-    const configPath = join(root, LINEAGE_REPOSITORY_CONFIG);
+    const gitDirectory = await resolveGitDirectory(root);
+    const configPath = join(gitDirectory, LINEAGE_GIT_DIRECTORY, LINEAGE_REPOSITORY_CONFIG);
     const existing = Bun.file(configPath);
     let config: RepositoryConfig;
     if (await existing.exists()) {
       config = RepositoryConfigSchema.parse(await existing.json());
     } else {
-      config = { protocolVersion: PROTOCOL_VERSION, repoId: crypto.randomUUID() };
-      await mkdir(dirname(configPath), { recursive: true });
+      const legacy = Bun.file(join(root, LINEAGE_LEGACY_REPOSITORY_CONFIG));
+      const repoId = options.repoId ?? (
+        (await legacy.exists())
+          ? RepositoryConfigSchema.parse(await legacy.json()).repoId
+          : await deriveRepositoryId(root)
+      );
+      config = { protocolVersion: PROTOCOL_VERSION, repoId };
+      await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
       await Bun.write(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await chmod(configPath, 0o600);
     }
     await configureLineageRefs(root);
     await installPostCommitHook(root);
@@ -60,15 +73,16 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
 
   static async open(cwd: string): Promise<GitLineageRepository> {
     const root = await findRepositoryRoot(cwd);
-    const configPath = join(root, LINEAGE_REPOSITORY_CONFIG);
-    if (!(await Bun.file(configPath).exists())) {
+    const gitDirectory = await resolveGitDirectory(root);
+    const configPath = join(gitDirectory, LINEAGE_GIT_DIRECTORY, LINEAGE_REPOSITORY_CONFIG);
+    const local = Bun.file(configPath);
+    const legacy = Bun.file(join(root, LINEAGE_LEGACY_REPOSITORY_CONFIG));
+    if (!(await local.exists()) && !(await legacy.exists())) {
       throw new Error("Lineage is not initialized. Run `lineage init` first.");
     }
-    const config = RepositoryConfigSchema.parse(await Bun.file(configPath).json());
-    const rawGitDirectory = (await runGit(root, ["rev-parse", "--git-dir"])).stdout.trim();
-    const gitDirectory = isAbsolute(rawGitDirectory)
-      ? rawGitDirectory
-      : resolve(root, rawGitDirectory);
+    const config = RepositoryConfigSchema.parse(
+      await (await local.exists() ? local : legacy).json(),
+    );
     return new GitLineageRepository(root, gitDirectory, config);
   }
 
@@ -295,6 +309,49 @@ export class GitLineageRepository implements LineageStore, CommitInspector {
     );
     return notes.flat();
   }
+}
+
+export function normalizeRemoteUrl(remote: string): string {
+  let value = remote.trim();
+  const scp = value.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
+  if (scp && !value.includes("://")) {
+    value = `${scp[1]}/${scp[2]}`;
+  } else {
+    try {
+      const url = new URL(value);
+      value = `${url.hostname}${url.pathname}`;
+    } catch {
+      value = value.replace(/^ssh:\/\//, "").replace(/^[^@/]+@/, "");
+    }
+  }
+  return value
+    .replace(/[?#].*$/, "")
+    .replace(/\.git\/?$/i, "")
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+}
+
+export async function deriveRepositoryId(root: string): Promise<string> {
+  const origin = await runGit(root, ["remote", "get-url", "origin"], {
+    allowFailure: true,
+  });
+  let identity: string;
+  if (origin.exitCode === 0 && origin.stdout.trim()) {
+    identity = `remote:${normalizeRemoteUrl(origin.stdout)}`;
+  } else {
+    const firstCommit = await runGit(root, ["rev-list", "--max-parents=0", "HEAD"], {
+      allowFailure: true,
+    });
+    identity = firstCommit.exitCode === 0 && firstCommit.stdout.trim()
+      ? `root:${firstCommit.stdout.trim().split("\n").sort()[0]}`
+      : `local:${crypto.randomUUID()}`;
+  }
+  return `repo-${createHash("sha256").update(identity).digest("hex").slice(0, 32)}`;
+}
+
+async function resolveGitDirectory(root: string): Promise<string> {
+  const raw = (await runGit(root, ["rev-parse", "--git-dir"])).stdout.trim();
+  return isAbsolute(raw) ? raw : resolve(root, raw);
 }
 
 function intentReference(userId: string): string {

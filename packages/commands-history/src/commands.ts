@@ -39,12 +39,18 @@ function actorFrom(args: CommandArguments): Actor {
 export const initCommand: LineageCommand = {
   name: "init",
   description: "Initialize Lineage in the current Git repository",
-  async run(_args, context) {
-    const repository = await GitLineageRepository.initialize(context.cwd);
+  async run(rawArgs, context) {
+    const args = new CommandArguments(rawArgs);
+    const requestedRepoId = args.get("repo-id");
+    const repository = await GitLineageRepository.initialize(context.cwd, {
+      ...(requestedRepoId ? { repoId: requestedRepoId } : {}),
+    });
     try {
       return {
         repoId: await repository.getRepoId(),
         root: repository.root,
+        state: `${repository.gitDirectory}/lineage`,
+        worktreeChanged: false,
         notes: ["refs/notes/lineage/decisions", "refs/notes/lineage/intents"],
       };
     } finally {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLineageCore } from "@lineage/contracts/testing";
@@ -10,8 +10,8 @@ import {
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, inboxCommand, joinCommand, replyCommand } from "./commands";
-import { ensureClaudeMcpConfig } from "./mcp-register";
+import { announceCommand, askCommand, createInitCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
+import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
 
@@ -47,9 +47,9 @@ async function makeTempRepo(): Promise<string> {
   tempDirs.push(dir);
   const git = Bun.spawn(["git", "init", "-q"], { cwd: dir });
   if ((await git.exited) !== 0) throw new Error("git init failed");
-  mkdirSync(join(dir, ".lineage"), { recursive: true });
+  mkdirSync(join(dir, ".git", "lineage"), { recursive: true });
   await Bun.write(
-    join(dir, ".lineage", "repo.json"),
+    join(dir, ".git", "lineage", "repo.json"),
     JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }, null, 2),
   );
   return dir;
@@ -89,23 +89,102 @@ async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void>
 }
 
 describe("mcp registration", () => {
-  test("writes, preserves, and does not duplicate .mcp.json entries", async () => {
+  test("registers installed providers through their supported local CLIs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lineage-mcpjson-"));
     tempDirs.push(dir);
-    await Bun.write(
-      join(dir, ".mcp.json"),
-      JSON.stringify({ mcpServers: { other: { command: "x" } } }),
-    );
-    expect(await ensureClaudeMcpConfig(dir, join(dir, "server.ts"))).toBe("updated");
-    expect(await ensureClaudeMcpConfig(dir, join(dir, "server.ts"))).toBe("unchanged");
-    const config = await Bun.file(join(dir, ".mcp.json")).json();
-    expect(config.mcpServers.other).toEqual({ command: "x" });
-    expect(config.mcpServers.lineage.command).toBe("bun");
-    expect(config.mcpServers.lineage.args).toEqual(["server.ts"]);
+    const calls: string[][] = [];
+    const result = await ensureMcpRegistrations({
+      cwd: dir,
+      serverPath: join(dir, "server.ts"),
+      which: (name) => `/bin/${name}`,
+      run: (command) => {
+        calls.push(command);
+        return { exitCode: command.includes("get") ? 1 : 0, stdout: "", stderr: "" };
+      },
+    });
+    expect(result).toEqual({ claude: "registered", codex: "registered", errors: [] });
+    expect(calls).toContainEqual([
+      "/bin/claude", "mcp", "add", "--scope", "local", "lineage", "--", "bun", join(dir, "server.ts"),
+    ]);
+    expect(calls).toContainEqual([
+      "/bin/codex", "mcp", "add", "lineage", "--", "bun", join(dir, "server.ts"),
+    ]);
+    expect(await Bun.file(join(dir, ".mcp.json")).exists()).toBeFalse();
+  });
+
+  test("does not duplicate existing provider registrations", async () => {
+    const calls: string[][] = [];
+    const result = await ensureMcpRegistrations({
+      cwd: "/tmp",
+      which: (name) => `/bin/${name}`,
+      run: (command) => {
+        calls.push(command);
+        return { exitCode: 0, stdout: "configured", stderr: "" };
+      },
+    });
+    expect(result.claude).toBe("unchanged");
+    expect(result.codex).toBe("unchanged");
+    expect(calls.filter((command) => command.includes("add"))).toHaveLength(0);
   });
 });
 
 describe("network commands", () => {
+  test("init keeps the worktree clean and can skip optional setup", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "lineage-init-"));
+    tempDirs.push(repo);
+    let command = Bun.spawnSync(["git", "init", "-q"], { cwd: repo });
+    expect(command.exitCode).toBe(0);
+    command = Bun.spawnSync([
+      "git", "remote", "add", "origin", "git@github.com:example/demo.git",
+    ], { cwd: repo });
+    expect(command.exitCode).toBe(0);
+    const result = await initCommand.run(["--no-mcp", "--no-index"], {
+      cwd: repo,
+      json: true,
+    }) as {
+      repoId: string;
+      worktreeChanged: boolean;
+      mcp: { claude: string; codex: string; errors: string[] };
+      index: { status: string };
+    };
+    expect(result.repoId).toMatch(/^repo-[a-f0-9]{32}$/);
+    expect(result.worktreeChanged).toBeFalse();
+    expect(result.mcp).toEqual({ claude: "skipped", codex: "skipped", errors: [] });
+    expect(result.index.status).toBe("skipped");
+    expect(await Bun.file(join(repo, ".git", "lineage", "repo.json")).exists()).toBeTrue();
+    const status = Bun.spawnSync(["git", "status", "--porcelain"], { cwd: repo });
+    expect(new TextDecoder().decode(status.stdout)).toBe("");
+  });
+
+  test("init registers MCP clients and indexes existing sessions by default", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "lineage-init-default-"));
+    tempDirs.push(repo);
+    expect(Bun.spawnSync(["git", "init", "-q"], { cwd: repo }).exitCode).toBe(0);
+    expect(Bun.spawnSync([
+      "git", "remote", "add", "origin", "https://github.com/example/demo.git",
+    ], { cwd: repo }).exitCode).toBe(0);
+    let registeredCwd = "";
+    let indexed = false;
+    const command = createInitCommand({
+      registerMcp: async (options) => {
+        registeredCwd = options.cwd;
+        return { claude: "registered", codex: "unchanged", errors: [] };
+      },
+      refreshIndex: async () => {
+        indexed = true;
+        return { version: 1, updatedAt: new Date().toISOString(), entries: [] };
+      },
+    });
+    const result = await command.run([], { cwd: repo, json: true }) as {
+      mcp: { claude: string; codex: string };
+      index: { status: string; entries: number };
+    };
+    expect(registeredCwd).toBe(realpathSync(repo));
+    expect(indexed).toBeTrue();
+    expect(result.mcp).toMatchObject({ claude: "registered", codex: "unchanged" });
+    expect(result.index).toEqual({ status: "indexed", entries: 0 });
+  });
+
   test("join validates and stores connection settings", async () => {
     const repo = await makeTempRepo();
     const output = await joinCommand.run(
@@ -225,9 +304,6 @@ describe("run wrapper", () => {
     expect(agentEnv.session).toBe(result.sessionId);
     expect(agentEnv.user).toBe("alice");
     expect(agentEnv.provider).toBe("claude");
-
-    // .mcp.json was registered for Claude Code.
-    expect(await Bun.file(join(repo, ".mcp.json")).exists()).toBeTrue();
 
     const index = await loadPromptIndex(indexPath);
     expect(index.entries).toHaveLength(1);

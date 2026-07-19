@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DefaultLineageCore } from "@lineage/core";
 import { DECISIONS_NOTES_REF } from "@lineage/contracts";
-import { GitLineageRepository } from "./repository";
+import { GitLineageRepository, normalizeRemoteUrl } from "./repository";
 import { runGit } from "./git";
 
 const temporaryDirectories: string[] = [];
@@ -30,6 +30,37 @@ async function createRepository(): Promise<string> {
 }
 
 describe("GitLineageRepository", () => {
+  test("derives the same private repo identity from SSH and HTTPS remotes", async () => {
+    const first = await createRepository();
+    const second = await createRepository();
+    await runGit(first, ["remote", "add", "origin", "git@github.com:Example/Project.git"]);
+    await runGit(second, ["remote", "add", "origin", "https://github.com/example/project.git"]);
+    const firstRepo = await GitLineageRepository.initialize(first);
+    const secondRepo = await GitLineageRepository.initialize(second);
+    expect(await firstRepo.getRepoId()).toBe(await secondRepo.getRepoId());
+    expect(normalizeRemoteUrl("git@github.com:Example/Project.git")).toBe(
+      "github.com/example/project",
+    );
+    expect(await Bun.file(join(first, ".git", "lineage", "repo.json")).exists()).toBeTrue();
+    expect(await Bun.file(join(first, ".lineage", "repo.json")).exists()).toBeFalse();
+    firstRepo.close();
+    secondRepo.close();
+  });
+
+  test("migrates the legacy committed room id into private Git state", async () => {
+    const root = await createRepository();
+    await mkdir(join(root, ".lineage"));
+    await Bun.write(
+      join(root, ".lineage", "repo.json"),
+      JSON.stringify({ protocolVersion: 1, repoId: "legacy-shared-room" }),
+    );
+    const repository = await GitLineageRepository.initialize(root);
+    expect(await repository.getRepoId()).toBe("legacy-shared-room");
+    const local = await Bun.file(join(root, ".git", "lineage", "repo.json")).json();
+    expect(local.repoId).toBe("legacy-shared-room");
+    repository.close();
+  });
+
   test("stores current intent in a Git ref and approved decisions in Git notes", async () => {
     const root = await createRepository();
     const repository = await GitLineageRepository.initialize(root);

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   IdentifierSchema,
   LINEAGE_GIT_DIRECTORY,
+  LINEAGE_LEGACY_REPOSITORY_CONFIG,
   LINEAGE_REPOSITORY_CONFIG,
   ProviderSchema,
   RepositoryConfigSchema,
@@ -70,7 +71,10 @@ async function readJsonFile(path: string): Promise<unknown | undefined> {
 export async function readRepoId(cwd: string): Promise<string> {
   const root = findRepoRoot(cwd);
   if (!root) throw new Error(`Not inside a Git repository: ${cwd}`);
-  const raw = await readJsonFile(join(root, LINEAGE_REPOSITORY_CONFIG));
+  const stateDir = resolveStateDir(cwd);
+  const raw =
+    (await readJsonFile(join(stateDir, LINEAGE_REPOSITORY_CONFIG))) ??
+    (await readJsonFile(join(root, LINEAGE_LEGACY_REPOSITORY_CONFIG)));
   if (!raw) {
     throw new Error("Lineage is not initialized here. Run `lineage init` first.");
   }

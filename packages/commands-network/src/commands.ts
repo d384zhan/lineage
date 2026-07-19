@@ -18,8 +18,71 @@ import { TransportError } from "@lineage/transport";
 import { CommandArguments, historyCommands } from "@lineage/commands-history";
 import { runAgent } from "./run-wrapper";
 import { refreshPromptIndex, traceCodeLine } from "@lineage/prompt-index";
+import { ensureMcpRegistrations } from "./mcp-register";
 
 const NEVER = new Promise<never>(() => {});
+
+interface InitDependencies {
+  registerMcp: typeof ensureMcpRegistrations;
+  refreshIndex: typeof refreshPromptIndex;
+}
+
+export function createInitCommand(
+  dependencies: InitDependencies = {
+    registerMcp: ensureMcpRegistrations,
+    refreshIndex: refreshPromptIndex,
+  },
+): LineageCommand {
+  return {
+    name: "init",
+    description: "Initialize local Lineage identity, MCP tools, and prompt index",
+    async run(rawArgs, context) {
+      const local = historyCommands.find((command) => command.name === "init");
+      if (!local) throw new Error("history init command is missing");
+      const initialized = await local.run(rawArgs, context) as {
+        repoId: string;
+        root: string;
+        state: string;
+        worktreeChanged: boolean;
+        notes: string[];
+      };
+      const args = new CommandArguments(rawArgs);
+      const mcp = args.get("no-mcp") === "true"
+        ? { claude: "skipped", codex: "skipped", errors: [] }
+        : await dependencies.registerMcp({ cwd: initialized.root });
+      let index:
+        | { status: "indexed"; entries: number }
+        | { status: "skipped" | "failed"; error?: string };
+      if (args.get("no-index") === "true") {
+        index = { status: "skipped" };
+      } else {
+        try {
+          const refreshed = await dependencies.refreshIndex();
+          index = { status: "indexed", entries: refreshed.entries.length };
+        } catch (error) {
+          index = {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+      const result = { ...initialized, mcp, index };
+      if (context.json) return result;
+      const indexText = index.status === "indexed"
+        ? `${index.entries} prompts indexed`
+        : `index ${index.status}${index.error ? `: ${index.error}` : ""}`;
+      return [
+        `Lineage initialized for ${initialized.repoId}.`,
+        `Local state: ${initialized.state} (worktree unchanged)`,
+        `MCP: Claude ${mcp.claude}, Codex ${mcp.codex}`,
+        `History: ${indexText}`,
+        ...mcp.errors,
+      ].join("\n");
+    },
+  };
+}
+
+export const initCommand = createInitCommand();
 
 function parseEvidence(values: readonly string[]): EvidenceRef[] {
   return values.map((value) => {
@@ -88,7 +151,7 @@ export const tunnelCommand: LineageCommand = {
       throw new Error(
         [
           "cloudflared is not installed.",
-          "Install it with: winget install Cloudflare.cloudflared",
+          "Install it with `brew install cloudflared` (macOS) or `winget install Cloudflare.cloudflared` (Windows).",
           `Then run: cloudflared tunnel --url http://localhost:${port}`,
           "Teammates join the printed https://....trycloudflare.com URL as wss://....trycloudflare.com",
         ].join("\n"),
@@ -333,6 +396,7 @@ export const announceCommand: LineageCommand = {
 };
 
 export const networkCommands: readonly LineageCommand[] = [
+  initCommand,
   hostCommand,
   tunnelCommand,
   joinCommand,
