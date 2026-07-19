@@ -52,7 +52,7 @@ commit. Rerun it after installing another agent CLI.
 
 ```bash
 lineage init                       # local setup; no files to commit
-lineage host --port 8787           # terminal 1 — prints the room token
+lineage host --port 8787           # terminal 1; creates or reuses this repo's room token
 lineage join --relay ws://localhost:8787 --token <token> --user alice --provider codex
 lineage run codex                  # terminal 2 — starts messaging invisibly
 ```
@@ -68,6 +68,70 @@ lineage run claude                  # requests and answers interrupt Claude
 
 For computers on different networks, laptop A can run
 `lineage tunnel --port 8787` and laptop B can use the printed `wss://` URL.
+
+## Auth0 identity (optional)
+
+By default the relay trusts self-declared userIds gated by the shared room
+token. With Auth0 enabled, `lineage login` proves who you are in the browser
+once per computer (OAuth Device Authorization Flow), the daemon connects with
+that JWT, and the relay verifies it against the tenant's JWKS — a joiner cannot claim
+someone else's name, and every answer is tied to a verified identity.
+
+### One-time tenant setup
+
+1. Create a free tenant at [auth0.com](https://auth0.com) and note its domain,
+   e.g. `dev-xyz.us.auth0.com`.
+2. **Applications → Create Application → Native.** In its settings, under
+   *Advanced Settings → Grant Types*, enable **Device Code** (and keep
+   *Refresh Token*). Note the Client ID.
+3. **Applications → APIs → Create API.** Any identifier works, e.g.
+   `https://lineage/api` — this is the *audience*, matched byte-for-byte, and
+   it cannot be edited after creation, so beware trailing spaces when pasting.
+   Under the API's settings, enable **Allow Offline Access** so logins get
+   refresh tokens.
+4. On that API's **Application Access** tab (older dashboards call it
+   *Machine To Machine Applications*), find your Native app and **Grant
+   access** with **user-delegated** access. Without this, `lineage login`
+   fails with "Client is not authorized to access resource server".
+5. (Recommended) **Actions → Triggers → post-login**: add an Action that copies
+   the login email into the access token, so userIds are emails instead of
+   opaque `auth0|...` subject ids:
+
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     if (event.user.email) {
+       api.accessToken.setCustomClaim("https://lineage.dev/email", event.user.email);
+     }
+   };
+   ```
+
+### Using it
+
+```bash
+# Each teammate signs into Lineage once on their computer:
+lineage login --domain dev-xyz.us.auth0.com --client-id <client-id> --audience "https://lineage/api"
+
+# The host automatically uses that saved Auth0 tenant and reuses this repo's token:
+lineage host --port 8787
+
+# Each teammate pastes the printed command once; their verified userId is inferred:
+lineage join --relay ws://<host>:8787 --token <token>
+lineage run claude
+```
+
+The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
+and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity.
+The daemon uses it as your userId, so teammates `lineage ask <that-identity>`.
+Login is stored at `~/.lineage/auth.json` with owner-only permissions and
+refreshes automatically. `lineage logout` removes it for the whole computer.
+Use `lineage host --no-auth0` to deliberately run a room-token-only relay.
+Authenticated relays require both the saved room token and a valid identity.
+
+The first `lineage host` creates `.git/lineage/host.json`; later starts reuse
+the same token and port. A teammate only runs the printed `lineage join`
+command once because their relay URL and token are also saved under `.git`.
+If the host's LAN IP changes, rerun `lineage join --relay ws://<new-ip>:<port>`;
+the saved token and user identity fill in automatically.
 
 ### Demo beats
 

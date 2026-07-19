@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@lineage/contracts": "workspace:*"
+    "@lineage/contracts": "workspace:*",
+    "jose": "^6"
   }
 }

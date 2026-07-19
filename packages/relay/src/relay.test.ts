@@ -6,6 +6,7 @@ import {
   type WireEnvelope,
 } from "@lineage/contracts";
 import { startRelay, type RelayHandle } from "./server";
+import { createFakeIssuer, type FakeIssuer } from "./test-issuer";
 
 const TOKEN = "room-secret";
 
@@ -289,5 +290,153 @@ describe("relay", () => {
     await bob.next((m) => m.type === "intent.announce");
     expect(alice.ws.readyState).toBe(WebSocket.OPEN);
     expect(bob.ws.readyState).toBe(WebSocket.OPEN);
+  });
+
+  test("rejects authed envelopes whose sender differs from the hello identity", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const alice = await join(relay.url, { userId: "alice", provider: "claude" });
+    await join(relay.url, { userId: "bob", provider: "codex" });
+
+    alice.send(
+      envelope({
+        type: "presence",
+        sender: { userId: "bob", provider: "codex" },
+        payload: { status: "busy" },
+      }),
+    );
+    const error = await alice.next((m) => m.type === "error");
+    expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+  });
+});
+
+describe("relay with Auth0 verification", () => {
+  const AUDIENCE = "https://lineage.example/api";
+  let issuer: FakeIssuer;
+
+  async function startAuthRelay(): Promise<RelayHandle> {
+    issuer = await createFakeIssuer({ audience: AUDIENCE });
+    return startRelay({
+      port: 0,
+      token: TOKEN,
+      auth: { issuer: issuer.issuer, audience: AUDIENCE, jwks: issuer.jwks },
+    });
+  }
+
+  function authHello(
+    userId: string,
+    accessToken: string | undefined,
+    roomToken = TOKEN,
+  ): WireEnvelope {
+    return envelope({
+      type: "hello",
+      sender: { userId, provider: "claude" },
+      payload: accessToken ? { roomToken, accessToken } : { roomToken },
+    });
+  }
+
+  test("acks a hello carrying a valid JWT whose identity matches the userId", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const client = await connect(relay.url);
+    const frame = authHello("alice@example.com", token);
+    client.send(frame);
+    const ack = await client.next((m) => m.type === "ack");
+    expect(ack.type === "ack" && ack.payload.messageId).toBe(frame.id);
+  });
+
+  test("falls back to sub as the identity when no email claim exists", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({ sub: "auth0|steve" });
+    const client = await connect(relay.url);
+    const frame = authHello("auth0|steve", token);
+    client.send(frame);
+    const ack = await client.next((m) => m.type === "ack");
+    expect(ack.type === "ack" && ack.payload.messageId).toBe(frame.id);
+  });
+
+  test("rejects a hello without an access token", async () => {
+    relay = await startAuthRelay();
+    const client = await connect(relay.url);
+    client.send(authHello("alice@example.com", undefined));
+    const error = await client.next((m) => m.type === "error");
+    expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+    expect(error.type === "error" && error.payload.message).toContain("lineage login");
+    const { code } = await client.closed;
+    expect(code).toBe(4001);
+  });
+
+  test("rejects tokens signed by an unknown key", async () => {
+    relay = await startAuthRelay();
+    const rogue = await createFakeIssuer({ audience: AUDIENCE, issuer: issuer.issuer });
+    const token = await rogue.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const client = await connect(relay.url);
+    client.send(authHello("alice@example.com", token));
+    const error = await client.next((m) => m.type === "error");
+    expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+    await client.closed;
+  });
+
+  test("rejects a valid identity with the wrong room token", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const client = await connect(relay.url);
+    client.send(authHello("alice@example.com", token, "wrong-room"));
+    const error = await client.next((message) => message.type === "error");
+    expect(error.type === "error" && error.payload.message).toContain("Room token rejected");
+    await client.closed;
+  });
+
+  test("rejects tokens minted for a different audience", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({
+      sub: "auth0|1",
+      email: "alice@example.com",
+      audience: "https://other.example/api",
+    });
+    const client = await connect(relay.url);
+    client.send(authHello("alice@example.com", token));
+    const error = await client.next((m) => m.type === "error");
+    expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+    await client.closed;
+  });
+
+  test("rejects a hello whose userId does not match the token identity", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const client = await connect(relay.url);
+    client.send(authHello("bob@example.com", token));
+    const error = await client.next((m) => m.type === "error");
+    expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+    expect(error.type === "error" && error.payload.message).toContain("alice@example.com");
+    await client.closed;
+  });
+
+  test("authenticated members exchange questions normally", async () => {
+    relay = await startAuthRelay();
+    const aliceToken = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const bobToken = await issuer.sign({ sub: "auth0|2", email: "bob@example.com" });
+
+    const alice = await connect(relay.url);
+    const aliceFrame = authHello("alice@example.com", aliceToken);
+    alice.send(aliceFrame);
+    await alice.next((m) => m.type === "ack" && m.payload.messageId === aliceFrame.id);
+
+    const bob = await connect(relay.url);
+    const bobFrame = authHello("bob@example.com", bobToken);
+    bob.send(bobFrame);
+    await bob.next((m) => m.type === "ack" && m.payload.messageId === bobFrame.id);
+
+    const requestId = crypto.randomUUID();
+    bob.send(
+      envelope({
+        type: "question.ask",
+        sender: { userId: "bob@example.com", provider: "claude" },
+        recipient: "alice@example.com",
+        requestId,
+        payload: { text: "Why rotate refresh tokens?", evidence: [] },
+      }),
+    );
+    const delivered = await alice.next((m) => m.type === "question.ask");
+    expect(delivered.requestId).toBe(requestId);
   });
 });

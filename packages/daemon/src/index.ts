@@ -17,15 +17,40 @@ export { resolveRepositoryAuthorship } from "./authorship";
 export { DAEMON_SECRET_HEADER } from "./http";
 export type { CoreRuntime, RuntimeOpener } from "./http";
 export {
+  AuthSettingsSchema,
+  HostSettingsSchema,
   NetworkSettingsSchema,
   DaemonInfoSchema,
+  deleteAuthSettings,
   findGitDir,
   findRepoRoot,
+  readAuthSettings,
   readDaemonInfo,
+  readHostSettings,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
+  resolveUserStateDir,
+  writeAuthSettings,
   writeDaemonInfo,
+  writeHostSettings,
   writeNetworkSettings,
 } from "./files";
-export type { DaemonInfo, NetworkSettings } from "./files";
+export type { AuthSettings, DaemonInfo, HostSettings, NetworkSettings } from "./files";
+export {
+  decodeJwtPayload,
+  ensureFreshAuth,
+  identityFromAccessToken,
+  pollForTokens,
+  refreshAuth,
+  requestDeviceCode,
+  toAuthSettings,
+} from "./oauth";
+export type {
+  DeviceCodeResponse,
+  EnsureFreshOptions,
+  Fetcher,
+  OAuthConfig,
+  PollOptions,
+  TokenResponse,
+} from "./oauth";

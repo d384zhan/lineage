@@ -105,5 +105,17 @@
       "message": "alice is offline",
       "requestId": "request-3"
     }
+  },
+  {
+    "version": 1,
+    "id": "message-hello-auth",
+    "repoId": "repo-1",
+    "type": "hello",
+    "sender": { "userId": "alice@example.com", "provider": "claude" },
+    "createdAt": "2026-07-18T19:00:00.000Z",
+    "payload": {
+      "roomToken": "room-secret",
+      "accessToken": "eyJhbGciOiJSUzI1NiJ9.fake.signature"
+    }
   }
 ]

@@ -108,6 +108,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@lineage/contracts": "workspace:*",
+        "jose": "^6",
       },
     },
     "packages/transport": {

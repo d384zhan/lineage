@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import { networkInterfaces } from "node:os";
 import {
   ProviderSchema,
   type AnnounceResult,
@@ -7,14 +8,25 @@ import {
 } from "@lineage/contracts";
 import {
   DaemonClient,
+  deleteAuthSettings,
   detectGitIdentities,
   parseGitIdentity,
+  pollForTokens,
+  readAuthSettings,
+  readHostSettings,
   readNetworkSettings,
   readRepoId,
+  requestDeviceCode,
   resolveStateDir,
+  resolveUserStateDir,
   startDaemon,
+  toAuthSettings,
+  writeAuthSettings,
+  writeHostSettings,
   writeNetworkSettings,
   type ApprovalIo,
+  type Fetcher,
+  type OAuthConfig,
 } from "@lineage/daemon";
 import { startRelay } from "@lineage/relay";
 import { TransportError } from "@lineage/transport";
@@ -24,6 +36,15 @@ import { refreshPromptIndex, traceCodeLine } from "@lineage/prompt-index";
 import { ensureMcpRegistrations } from "./mcp-register";
 
 const NEVER = new Promise<never>(() => {});
+
+function localLanAddress(): string | undefined {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) return address.address;
+    }
+  }
+  return undefined;
+}
 
 interface InitDependencies {
   registerMcp: typeof ensureMcpRegistrations;
@@ -123,18 +144,54 @@ function friendlyAskError(error: unknown, recipient: string): Error {
 export const hostCommand: LineageCommand = {
   name: "host",
   description: "Run the relay other laptops connect to (pair with `lineage tunnel`)",
-  async run(rawArgs) {
+  async run(rawArgs, context) {
     const args = new CommandArguments(rawArgs);
-    const port = Number(args.get("port") ?? "8787");
+    const stateDir = resolveStateDir(context.cwd);
+    const savedHost = await readHostSettings(stateDir);
+    const savedNetwork = await readNetworkSettings(stateDir);
+    const login = await readAuthSettings(resolveUserStateDir()).catch(() => undefined);
+    const port = Number(args.get("port") ?? savedHost?.port ?? "8787");
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       throw new Error("--port must be a valid TCP port");
     }
-    const token = args.get("token") ?? crypto.randomUUID().replaceAll("-", "");
-    const relay = startRelay({ port, token, log: (line) => console.log(`[relay] ${line}`) });
+    const token =
+      args.get("token") ??
+      savedHost?.roomToken ??
+      savedNetwork?.roomToken ??
+      crypto.randomUUID().replaceAll("-", "");
+    const authDisabled = args.get("no-auth0") === "true";
+    const auth0Domain = authDisabled
+      ? undefined
+      : args.get("auth0-domain") ?? process.env["LINEAGE_AUTH0_DOMAIN"] ?? login?.domain;
+    const auth0Audience = authDisabled
+      ? undefined
+      : args.get("auth0-audience") ?? process.env["LINEAGE_AUTH0_AUDIENCE"] ?? login?.audience;
+    if ((auth0Domain && !auth0Audience) || (!auth0Domain && auth0Audience)) {
+      throw new Error("--auth0-domain and --auth0-audience must be set together");
+    }
+    const relay = startRelay({
+      port,
+      token,
+      hostname: args.get("hostname") ?? "0.0.0.0",
+      ...(auth0Domain && auth0Audience
+        ? { auth: { issuer: auth0Domain, audience: auth0Audience } }
+        : {}),
+      log: (line) => console.log(`[relay] ${line}`),
+    });
+    await writeHostSettings(stateDir, { roomToken: token, port: relay.port });
     console.log(`lineage relay listening on ws://localhost:${relay.port}`);
+    if (auth0Domain) {
+      console.log(`Auth0 verification enabled (${auth0Domain}); joiners must \`lineage login\` first.`);
+    }
     console.log("");
     console.log("Teammates on this network join with:");
-    console.log(`  lineage join --relay ws://<your-ip>:${relay.port} --token ${token} --user <name>`);
+    const advertisedHost = localLanAddress() ?? "<your-ip>";
+    console.log(
+      `  lineage join --relay ws://${advertisedHost}:${relay.port} --token ${token}${
+        auth0Domain ? "" : " --user <name>"
+      }`,
+    );
+    console.log("  (paste once; Lineage remembers this room on that computer)");
     console.log("");
     console.log("For other networks, expose it with:");
     console.log(`  lineage tunnel --port ${relay.port}`);
@@ -187,43 +244,55 @@ export const tunnelCommand: LineageCommand = {
   },
 };
 
-export const joinCommand: LineageCommand = {
-  name: "join",
-  description: "Save the relay URL, room token, and your user name for this repo",
-  async run(rawArgs, context) {
-    const args = new CommandArguments(rawArgs);
-    let relayUrl = args.require("relay");
-    if (relayUrl.startsWith("https://")) relayUrl = `wss://${relayUrl.slice(8)}`;
-    if (relayUrl.startsWith("http://")) relayUrl = `ws://${relayUrl.slice(7)}`;
-    if (!relayUrl.startsWith("ws://") && !relayUrl.startsWith("wss://")) {
-      throw new Error("--relay must be a ws://, wss://, http://, or https:// URL");
-    }
-    const providerValue = args.get("provider");
-    const gitIdentities = detectGitIdentities(
-      context.cwd,
-      args.all("git-identity").map(parseGitIdentity),
-    );
-    const settings = {
-      relayUrl,
-      roomToken: args.require("token"),
-      userId: args.require("user"),
-      ...(providerValue ? { provider: ProviderSchema.parse(providerValue) } : {}),
-      ...(gitIdentities.length ? { gitIdentities } : {}),
-    };
-    const repoId = await readRepoId(context.cwd);
-    await writeNetworkSettings(resolveStateDir(context.cwd), settings);
-    if (!context.json) {
-      return [
-        `Joined room ${repoId} as ${settings.userId} via ${relayUrl}.`,
-        ...(gitIdentities.length
-          ? [`Git identity: ${gitIdentities.map((identity) => `${identity.name} <${identity.email}>`).join(", ")}.`]
-          : ["Git identity: none detected; configure Git or pass --git-identity \"Name <email>\"."]),
-        `Next: run \`lineage run ${settings.provider ?? "claude"}\` to start your agent with messaging.`,
-      ].join("\n");
-    }
-    return { repoId, ...settings, roomToken: "<saved>" };
-  },
-};
+export function createJoinCommand(userStateDir = resolveUserStateDir()): LineageCommand {
+  return {
+    name: "join",
+    description: "Save the relay URL, room token, and your user name for this repo",
+    async run(rawArgs, context) {
+      const args = new CommandArguments(rawArgs);
+      const stateDir = resolveStateDir(context.cwd);
+      const saved = await readNetworkSettings(stateDir);
+      const login = await readAuthSettings(userStateDir).catch(() => undefined);
+      let relayUrl = args.get("relay") ?? saved?.relayUrl;
+      if (!relayUrl) throw new Error("Missing --relay");
+      if (relayUrl.startsWith("https://")) relayUrl = `wss://${relayUrl.slice(8)}`;
+      if (relayUrl.startsWith("http://")) relayUrl = `ws://${relayUrl.slice(7)}`;
+      if (!relayUrl.startsWith("ws://") && !relayUrl.startsWith("wss://")) {
+        throw new Error("--relay must be a ws://, wss://, http://, or https:// URL");
+      }
+      const providerValue = args.get("provider");
+      const gitIdentities = detectGitIdentities(
+        context.cwd,
+        args.all("git-identity").map(parseGitIdentity),
+      );
+      const settings = {
+        relayUrl,
+        roomToken: args.get("token") ?? saved?.roomToken ?? args.require("token"),
+        userId: args.get("user") ?? login?.identity ?? saved?.userId ?? args.require("user"),
+        ...(providerValue
+          ? { provider: ProviderSchema.parse(providerValue) }
+          : saved?.provider
+            ? { provider: saved.provider }
+            : {}),
+        ...(gitIdentities.length ? { gitIdentities } : {}),
+      };
+      const repoId = await readRepoId(context.cwd);
+      await writeNetworkSettings(stateDir, settings);
+      if (!context.json) {
+        return [
+          `Joined room ${repoId} as ${settings.userId} via ${relayUrl}.`,
+          ...(gitIdentities.length
+            ? [`Git identity: ${gitIdentities.map((identity) => `${identity.name} <${identity.email}>`).join(", ")}.`]
+            : ["Git identity: none detected; configure Git or pass --git-identity \"Name <email>\"."]),
+          `Next: run \`lineage run ${settings.provider ?? "claude"}\` to start your agent with messaging.`,
+        ].join("\n");
+      }
+      return { repoId, ...settings, roomToken: "<saved>" };
+    },
+  };
+}
+
+export const joinCommand = createJoinCommand();
 
 export const identityCommand: LineageCommand = {
   name: "identity",
@@ -256,6 +325,91 @@ export const identityCommand: LineageCommand = {
       : "No Git identities configured.";
   },
 };
+
+export interface LoginDependencies {
+  fetcher?: Fetcher;
+  sleep?: (ms: number) => Promise<void>;
+  print?: (line: string) => void;
+  userStateDir?: string;
+}
+
+export function createLoginCommand(dependencies: LoginDependencies = {}): LineageCommand {
+  return {
+    name: "login",
+    description: "Sign in with Auth0 so relays can verify your identity",
+    async run(rawArgs, context) {
+      const print = dependencies.print ?? ((line: string) => console.log(line));
+      const args = new CommandArguments(rawArgs);
+      const userStateDir = dependencies.userStateDir ?? resolveUserStateDir();
+      let stored = await readAuthSettings(userStateDir).catch(() => undefined);
+      if (!stored) {
+        const repoStateDir = (() => {
+          try {
+            return resolveStateDir(context.cwd);
+          } catch {
+            return undefined;
+          }
+        })();
+        stored = repoStateDir
+          ? await readAuthSettings(repoStateDir).catch(() => undefined)
+          : undefined;
+        if (stored) await writeAuthSettings(userStateDir, stored);
+      }
+      const domain =
+        args.get("domain") ?? process.env["LINEAGE_AUTH0_DOMAIN"] ?? stored?.domain;
+      const clientId =
+        args.get("client-id") ?? process.env["LINEAGE_AUTH0_CLIENT_ID"] ?? stored?.clientId;
+      const audience =
+        args.get("audience") ?? process.env["LINEAGE_AUTH0_AUDIENCE"] ?? stored?.audience;
+      if (!domain || !clientId || !audience) {
+        throw new Error(
+          [
+            "Auth0 tenant settings are missing. Provide them once via flags or env vars:",
+            '  lineage login --domain dev-xyz.us.auth0.com --client-id <id> --audience "https://lineage/api"',
+            "  (or set LINEAGE_AUTH0_DOMAIN / LINEAGE_AUTH0_CLIENT_ID / LINEAGE_AUTH0_AUDIENCE)",
+            "See README.md → \"Auth0 identity\" for tenant setup steps.",
+          ].join("\n"),
+        );
+      }
+      const config: OAuthConfig = { domain, clientId, audience };
+      const device = await requestDeviceCode(config, dependencies.fetcher);
+      print("To sign in, open this URL in any browser:");
+      print(`  ${device.verification_uri_complete ?? device.verification_uri}`);
+      print(`and confirm the code: ${device.user_code}`);
+      print("Waiting for the browser login...");
+      const tokens = await pollForTokens(config, device, {
+        ...(dependencies.fetcher ? { fetcher: dependencies.fetcher } : {}),
+        ...(dependencies.sleep ? { sleep: dependencies.sleep } : {}),
+      });
+      const settings = toAuthSettings(config, tokens);
+      await writeAuthSettings(userStateDir, settings);
+      if (context.json) {
+        return { identity: settings.identity, expiresAt: settings.expiresAt };
+      }
+      return [
+        `Signed in as ${settings.identity}.`,
+        `The daemon will connect with this identity as your userId${
+          settings.refreshToken ? " and refresh the session automatically" : ""
+        }.`,
+      ].join("\n");
+    },
+  };
+}
+
+export const loginCommand = createLoginCommand();
+
+export function createLogoutCommand(userStateDir = resolveUserStateDir()): LineageCommand {
+  return {
+    name: "logout",
+    description: "Remove the machine-wide Auth0 login",
+    async run(_rawArgs, context) {
+      deleteAuthSettings(userStateDir);
+      return context.json ? { ok: true } : "Logged out. Lineage daemons will connect unauthenticated.";
+    },
+  };
+}
+
+export const logoutCommand = createLogoutCommand();
 
 export const daemonCommand: LineageCommand = {
   name: "daemon",
@@ -453,6 +607,8 @@ export const networkCommands: readonly LineageCommand[] = [
   tunnelCommand,
   joinCommand,
   identityCommand,
+  loginCommand,
+  logoutCommand,
   daemonCommand,
   runCommand,
   indexCommand,

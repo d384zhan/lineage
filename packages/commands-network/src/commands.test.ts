@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLineageCore } from "@lineage/contracts/testing";
 import {
+  readAuthSettings,
   readNetworkSettings,
   startDaemon,
+  writeAuthSettings,
   type ApprovalIo,
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createInitCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -204,6 +206,34 @@ describe("network commands", () => {
     });
   });
 
+  test("join uses machine login identity and remembers room credentials", async () => {
+    const repo = await makeTempRepo();
+    const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+    tempDirs.push(userStateDir);
+    await writeAuthSettings(userStateDir, {
+      domain: "tenant.example.com",
+      clientId: "client-1",
+      audience: "https://lineage.example/api",
+      accessToken: "header.payload.signature",
+      refreshToken: "refresh-1",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      identity: "lorena@example.com",
+    });
+    const joinWithLogin = createJoinCommand(userStateDir);
+
+    await joinWithLogin.run(
+      ["--relay", "ws://192.168.1.10:8787", "--token", TOKEN],
+      { cwd: repo, json: true },
+    );
+    const repeated = await joinWithLogin.run(
+      ["--provider", "claude"],
+      { cwd: repo, json: true },
+    ) as { userId: string; relayUrl: string };
+
+    expect(repeated.userId).toBe("lorena@example.com");
+    expect(repeated.relayUrl).toBe("ws://192.168.1.10:8787");
+  });
+
   test("adds Git identity aliases without requiring another join", async () => {
     const repo = await makeTempRepo();
     expect(Bun.spawnSync(["git", "config", "user.name", "Alice"], { cwd: repo }).exitCode).toBe(0);
@@ -381,5 +411,113 @@ describe("run wrapper", () => {
     expect(index.entries).toHaveLength(1);
     expect(index.entries[0]!.sessionId).toBe("claude-session");
     expect(JSON.stringify(index)).not.toContain("demo prompt");
+  });
+});
+
+describe("login command", () => {
+  function fakeJwt(claims: Record<string, unknown>): string {
+    const encode = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(claims)}.signature`;
+  }
+
+  test("walks the device flow and stores the verified identity", async () => {
+    const repo = await makeTempRepo();
+    const accessToken = fakeJwt({ sub: "auth0|7", email: "loren@example.com" });
+    let polls = 0;
+    const auth0 = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/oauth/device/code") {
+          return Response.json({
+            device_code: "device-123",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://issuer.test/activate",
+            expires_in: 300,
+            interval: 1,
+          });
+        }
+        if (url.pathname === "/oauth/token") {
+          polls += 1;
+          if (polls === 1) {
+            return Response.json({ error: "authorization_pending" }, { status: 403 });
+          }
+          return Response.json({
+            access_token: accessToken,
+            refresh_token: "refresh-1",
+            expires_in: 3600,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      const printed: string[] = [];
+      const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+      tempDirs.push(userStateDir);
+      const login = createLoginCommand({
+        sleep: async () => {},
+        print: (line) => printed.push(line),
+        userStateDir,
+      });
+      const result = await login.run(
+        [
+          "--domain", `http://127.0.0.1:${auth0.port}`,
+          "--client-id", "client-1",
+          "--audience", "https://lineage.example/api",
+        ],
+        { cwd: repo, json: true },
+      );
+      expect(result).toEqual({
+        identity: "loren@example.com",
+        expiresAt: expect.any(String),
+      });
+      expect(printed.join("\n")).toContain("ABCD-EFGH");
+
+      const stored = await readAuthSettings(userStateDir);
+      expect(stored!.accessToken).toBe(accessToken);
+      expect(stored!.identity).toBe("loren@example.com");
+
+      // Re-login reuses the stored tenant settings without flags.
+      const again = await login.run([], { cwd: repo, json: true });
+      expect(again).toEqual({
+        identity: "loren@example.com",
+        expiresAt: expect.any(String),
+      });
+
+      await createLogoutCommand(userStateDir).run([], { cwd: repo, json: true });
+      expect(await readAuthSettings(userStateDir)).toBeUndefined();
+    } finally {
+      auth0.stop(true);
+    }
+  });
+
+  test("explains what to do when tenant settings are missing", async () => {
+    const repo = await makeTempRepo();
+    const saved = {
+      domain: process.env["LINEAGE_AUTH0_DOMAIN"],
+      clientId: process.env["LINEAGE_AUTH0_CLIENT_ID"],
+      audience: process.env["LINEAGE_AUTH0_AUDIENCE"],
+    };
+    delete process.env["LINEAGE_AUTH0_DOMAIN"];
+    delete process.env["LINEAGE_AUTH0_CLIENT_ID"];
+    delete process.env["LINEAGE_AUTH0_AUDIENCE"];
+    try {
+      const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+      tempDirs.push(userStateDir);
+      const login = createLoginCommand({ print: () => {}, userStateDir });
+      const error = await login
+        .run([], { cwd: repo, json: false })
+        .then(() => undefined)
+        .catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("LINEAGE_AUTH0_DOMAIN");
+    } finally {
+      if (saved.domain !== undefined) process.env["LINEAGE_AUTH0_DOMAIN"] = saved.domain;
+      if (saved.clientId !== undefined) process.env["LINEAGE_AUTH0_CLIENT_ID"] = saved.clientId;
+      if (saved.audience !== undefined) process.env["LINEAGE_AUTH0_AUDIENCE"] = saved.audience;
+    }
   });
 });
