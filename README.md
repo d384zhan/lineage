@@ -63,7 +63,7 @@ lineage run codex                  # terminal 2 — starts messaging invisibly
 # clone the same Git repository; its origin produces the same Lineage room id
 lineage init
 lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider claude
-lineage run claude --lineage-channel # optional compact Claude queue notification
+lineage run claude                  # requests and answers interrupt Claude
 ```
 
 For computers on different networks, laptop A can run
@@ -110,10 +110,10 @@ For computers on different networks, laptop A can run
 - Use `lineage run claude|codex` for live messaging. It owns the daemon for the
   life of the coding-agent session, so no separate daemon terminal is needed.
   Launching normally still exposes pull-based MCP tools but cannot guarantee wake-ups.
-- Claude queue notifications use Claude Code Channels, currently a
-  research-preview API. They are off by default because Channel events appear
-  in Claude's composer. Enable them only with
-  `lineage run claude --lineage-channel`. Codex has no equivalent Lineage
+- Claude wake-ups use Claude Code Channels, currently a research-preview API.
+  They are enabled by default for `lineage run claude`: new requests and
+  completed answers interrupt the active session without blocking the sender.
+  Use `--no-lineage-channel` to opt out. Codex has no equivalent Lineage
   Channel, so it checks completed answers through `lineage_requests`.
 - The relay remains intentionally live-only for this MVP. Once the recipient's
   daemon accepts a question, its per-user inbox is durable; a fully offline

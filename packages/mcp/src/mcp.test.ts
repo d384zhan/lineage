@@ -242,7 +242,7 @@ describe("mcp server", () => {
     expect(result.answer.text).toBe("Because reservations prevent overselling.");
   });
 
-  test("optionally queues a compact pending question in an active Claude session", async () => {
+  test("interrupts active Claude sessions for new questions and completed answers", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();
     const bob = await startDaemon({
@@ -257,42 +257,57 @@ describe("mcp server", () => {
     });
     daemons.push(bob);
 
-    const aliceState = mkdtempSync(join(tmpdir(), "lineage-alice-channel-"));
-    tempDirs.push(aliceState);
+    const aliceState = await makeTempRepo();
     const alice = await startDaemon({
       cwd: aliceState,
       io: new ScriptedIo(),
-      stateDir: aliceState,
+      stateDir: join(aliceState, ".git", "lineage"),
       repoId: "repo-1",
-      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "codex" },
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "claude" },
       openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
     });
     daemons.push(alice);
 
-    const activeClaude = await makeClient(repo, {
+    const activeBob = await makeClient(repo, {
       [LINEAGE_USER_ID_ENV]: "bob",
       [LINEAGE_PROVIDER_ENV]: "claude",
       [LINEAGE_CHANNEL_ENV]: "1",
     });
-    const asking = DaemonClient.forPort(alice.port, alice.secret).ask({
+    const activeAlice = await makeClient(aliceState, {
+      [LINEAGE_USER_ID_ENV]: "alice",
+      [LINEAGE_PROVIDER_ENV]: "claude",
+      [LINEAGE_CHANNEL_ENV]: "1",
+    });
+    const queued = await activeAlice.callTool(MCP_TOOL_NAMES.ask, {
       recipient: "bob",
       text: "Why cookies?",
     });
+    const requestId = (JSON.parse(queued.text) as { requestId: string }).requestId;
     await until(() =>
-      activeClaude.notifications.some(
-        (notification) => notification.method === "notifications/claude/channel",
+      activeBob.notifications.some(
+        (notification) =>
+          notification.method === "notifications/claude/channel" &&
+          JSON.stringify(notification.params).includes(requestId),
       ),
     );
-    const requestId = bob.inbox.open()[0]!.requestId;
-    const dispatched = await activeClaude.callTool(MCP_TOOL_NAMES.respond, {
+    const dispatched = await activeBob.callTool(MCP_TOOL_NAMES.respond, {
       requestId,
       action: "dispatch",
     });
     expect(dispatched.text).toContain("Implement cookie auth for SSR");
-    await activeClaude.callTool(MCP_TOOL_NAMES.reply, {
+    await activeBob.callTool(MCP_TOOL_NAMES.reply, {
       requestId,
       text: "Cookies are readable during server rendering.",
     });
-    expect((await asking).text).toBe("Cookies are readable during server rendering.");
+    await until(() =>
+      activeAlice.notifications.some(
+        (notification) =>
+          notification.method === "notifications/claude/channel" &&
+          JSON.stringify(notification.params).includes(requestId),
+      ),
+    );
+    const completed = (await DaemonClient.forPort(alice.port, alice.secret).requests())
+      .find((entry) => entry.requestId === requestId);
+    expect(completed?.answer?.text).toBe("Cookies are readable during server rendering.");
   });
 });

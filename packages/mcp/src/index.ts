@@ -14,9 +14,10 @@ const channelEnabled =
   process.env[LINEAGE_PROVIDER_ENV] === "claude" &&
   process.env[LINEAGE_CHANNEL_ENV] === "1";
 const channelInstructions = [
-  "Lineage questions arrive as channel events from trusted teammates.",
-  "Show the question to the user and ask whether to dispatch this agent, answer manually, or reject.",
+  "Lineage requests and completed answers arrive as channel events from trusted teammates.",
+  "For a request, show the question and ask whether to dispatch this agent, answer manually, or reject.",
   "Call lineage_respond with their choice. After dispatch, answer using lineage_reply.",
+  "For a completed outgoing request, call lineage_requests with its request ID and show the answer.",
 ].join(" ");
 
 const server = new Server(
@@ -40,21 +41,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) =>
 
 await server.connect(new StdioServerTransport());
 
-const notified = new Set<string>();
+const notifiedInbound = new Set<string>();
+const notifiedOutgoing = new Set<string>();
+const outgoingStatuses = new Map<string, string>();
+const channelStartedAt = Date.now();
 let daemon: DaemonClient | undefined;
+let polling = false;
 const poll = async () => {
+  if (polling) return;
+  polling = true;
   try {
     daemon ??= await DaemonClient.open(process.cwd());
-    const entries = await daemon.inbox();
+    const [entries, outgoing] = await Promise.all([daemon.inbox(), daemon.requests()]);
     const pending = new Set(
       entries.filter((entry) => entry.status === "pending").map((entry) => entry.requestId),
     );
-    for (const requestId of notified) {
-      if (!pending.has(requestId)) notified.delete(requestId);
+    for (const requestId of notifiedInbound) {
+      if (!pending.has(requestId)) notifiedInbound.delete(requestId);
     }
     for (const entry of entries) {
-      if (entry.status !== "pending" || notified.has(entry.requestId)) continue;
-      notified.add(entry.requestId);
+      if (entry.status !== "pending" || notifiedInbound.has(entry.requestId)) continue;
       await server.notification({
         method: "notifications/claude/channel",
         params: {
@@ -69,10 +75,44 @@ const poll = async () => {
           },
         },
       } as Parameters<typeof server.notification>[0]);
+      notifiedInbound.add(entry.requestId);
+    }
+    for (const entry of outgoing) {
+      const previous = outgoingStatuses.get(entry.requestId);
+      outgoingStatuses.set(entry.requestId, entry.status);
+      if (
+        entry.status === "pending" ||
+        notifiedOutgoing.has(entry.requestId) ||
+        (previous !== "pending" && Date.parse(entry.createdAt) < channelStartedAt)
+      ) continue;
+      const content = entry.status === "answered"
+        ? [
+            `Lineage answer from ${entry.recipient} is ready: ${entry.question.text}`,
+            `Call lineage_requests with requestId ${entry.requestId} and show the answer to the user.`,
+          ].join("\n")
+        : [
+            `Lineage request to ${entry.recipient} ${entry.status}: ${entry.question.text}`,
+            `Call lineage_requests with requestId ${entry.requestId} and explain what happened.`,
+          ].join("\n");
+      await server.notification({
+        method: "notifications/claude/channel",
+        params: {
+          content,
+          meta: {
+            source: "lineage",
+            request_id: entry.requestId,
+            recipient: entry.recipient,
+            status: entry.status,
+          },
+        },
+      } as Parameters<typeof server.notification>[0]);
+      notifiedOutgoing.add(entry.requestId);
     }
   } catch {
     // The daemon may not be ready yet; the next poll retries.
     daemon = undefined;
+  } finally {
+    polling = false;
   }
 };
 

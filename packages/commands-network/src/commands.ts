@@ -237,15 +237,19 @@ export const daemonCommand: LineageCommand = {
 
 export const runCommand: LineageCommand = {
   name: "run",
-  description: "Start claude or codex with Lineage; add --lineage-channel for Claude notifications",
+  description: "Start claude or codex with Lineage; Claude notifications are enabled by default",
   async run(rawArgs, context) {
     const [providerValue, ...extraArgs] = rawArgs;
     const provider = ProviderSchema.parse(providerValue ?? "");
-    const channel = extraArgs.includes("--lineage-channel");
-    const agentArgs = extraArgs.filter((arg) => arg !== "--lineage-channel");
-    if (channel && provider !== "claude") {
-      throw new Error("--lineage-channel is supported only by Claude Code");
+    const requestedChannel = extraArgs.includes("--lineage-channel");
+    const disabledChannel = extraArgs.includes("--no-lineage-channel");
+    if ((requestedChannel || disabledChannel) && provider !== "claude") {
+      throw new Error("Lineage Channel flags are supported only by Claude Code");
     }
+    const channel = provider === "claude" && !disabledChannel;
+    const agentArgs = extraArgs.filter(
+      (arg) => arg !== "--lineage-channel" && arg !== "--no-lineage-channel",
+    );
     const result = await runAgent({ cwd: context.cwd, provider, channel, extraArgs: agentArgs });
     return context.json ? result : `exit code ${result.exitCode}`;
   },
