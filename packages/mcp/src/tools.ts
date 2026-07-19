@@ -171,13 +171,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: MCP_TOOL_NAMES.ask,
     description:
-      "Queue a question for another developer's agent and return immediately with a requestId. The recipient approves before answering. Check lineage_requests later for the result.",
+      "Queue a question for another developer's agent and return immediately. For why/how, implementation, regression, or design-decision questions, inspect the repository first and always pass the narrowest relevant path:line. Do not send a generic prose-only question when a code anchor exists. Omit line only for broad status or coordination questions.",
     inputSchema: {
       type: "object",
       properties: {
         recipient: { type: "string", description: "The teammate's user id, e.g. \"joe\"." },
         text: { type: "string", description: "The question." },
-        line: { type: "string", description: "Optional path:line. Lineage adds Git blame evidence so the recipient can match their exact originating prompt." },
+        line: { type: "string", description: "Exact path:line to explain. Required whenever the question can be anchored to code; enables Git blame and private originating-prompt matching." },
         evidence: evidenceJsonSchema,
       },
       required: ["recipient"],

@@ -107,6 +107,9 @@ For computers on different networks, laptop A can run
 - Both Claude Code and Codex native session logs are indexed. `lineage run`
   refreshes the index after the agent exits; `lineage index` imports existing
   history, including sessions created before Lineage was installed.
+- The MCP instructions tell agents to ground why/how/design questions in the
+  narrowest relevant `path:line`. Broad status and coordination questions remain
+  valid, but cannot select an exact originating prompt without a code anchor.
 - Use `lineage run claude|codex` for live messaging. It owns the daemon for the
   life of the coding-agent session, so no separate daemon terminal is needed.
   Launching normally still exposes pull-based MCP tools but cannot guarantee wake-ups.

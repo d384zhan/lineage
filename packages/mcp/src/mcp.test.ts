@@ -91,6 +91,8 @@ describe("mcp server", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual(
       Object.values(MCP_TOOL_NAMES).sort(),
     );
+    expect(tools.find((tool) => tool.name === MCP_TOOL_NAMES.ask)?.description)
+      .toContain("always pass the narrowest relevant path:line");
   });
 
   test("lineage_why queries the real runtime and lineage_announce records an intent", async () => {

@@ -13,6 +13,11 @@ const tools = createTools({ cwd: process.cwd(), env: process.env });
 const channelEnabled =
   process.env[LINEAGE_PROVIDER_ENV] === "claude" &&
   process.env[LINEAGE_CHANNEL_ENV] === "1";
+const groundingInstructions = [
+  "Lineage questions about why code exists, implementation choices, regressions, or design decisions must be code-grounded.",
+  "Before calling lineage_ask for one of these questions, inspect the repository and pass the narrowest relevant path:line in the line argument.",
+  "The line enables Git blame and private originating-prompt matching. Omit it only for genuinely broad status or coordination questions.",
+].join(" ");
 const channelInstructions = [
   "Lineage requests and completed answers arrive as channel events from trusted teammates.",
   "For a request, show the question and ask whether to dispatch this agent, answer manually, or reject.",
@@ -27,7 +32,9 @@ const server = new Server(
       tools: {},
       ...(channelEnabled ? { experimental: { "claude/channel": {} } } : {}),
     },
-    ...(channelEnabled ? { instructions: channelInstructions } : {}),
+    instructions: channelEnabled
+      ? `${groundingInstructions} ${channelInstructions}`
+      : groundingInstructions,
   },
 );
 
