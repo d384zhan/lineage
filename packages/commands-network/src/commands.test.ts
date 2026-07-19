@@ -218,11 +218,14 @@ describe("network commands", () => {
     expect(listed.gitIdentities).toEqual([
       { name: "Alice", email: "alice@example.com" },
     ]);
+    expect(Bun.spawnSync(["git", "config", "user.name", "Alice New"], { cwd: repo }).exitCode).toBe(0);
+    expect(Bun.spawnSync(["git", "config", "user.email", "alice.new@example.com"], { cwd: repo }).exitCode).toBe(0);
     const result = await identityCommand.run(
       ["add", "Alice Work <alice@work.example>"],
       { cwd: repo, json: true },
     ) as { gitIdentities: Array<{ name: string; email: string }> };
     expect(result.gitIdentities).toEqual([
+      { name: "Alice New", email: "alice.new@example.com" },
       { name: "Alice", email: "alice@example.com" },
       { name: "Alice Work", email: "alice@work.example" },
     ]);

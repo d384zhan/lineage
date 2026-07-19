@@ -79,9 +79,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   if (!network) {
     throw new Error("No relay connection configured. Run `lineage join` first.");
   }
-  const gitIdentities = network.gitIdentities?.length
-    ? network.gitIdentities
-    : detectGitIdentities(options.cwd);
+  const gitIdentities = detectGitIdentities(options.cwd, network.gitIdentities ?? []);
   const actor: Actor = {
     userId: network.userId,
     ...(network.provider ? { provider: network.provider } : {}),

@@ -89,8 +89,9 @@ For computers on different networks, laptop A can run
 
 - Room secrets, relay URLs, and daemon state live under `.git/lineage/` and are
   never committed. Git notes carry only approved structured decisions.
-- `lineage join` captures the repository's effective Git name/email and carries
-  it with the Lineage actor. Add aliases with repeated
+- `lineage join` automatically reads the repository's effective Git name/email.
+  Every later session reads it again, so normal setup needs no identity command.
+  Add historical aliases with repeated
   `--git-identity "Name <email>"` flags. Existing joins are upgraded at daemon
   startup from `git config`, so rejoining is not required.
   Use `lineage identity add "Name <email>"` for historical aliases and

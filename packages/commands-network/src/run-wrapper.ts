@@ -67,9 +67,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const stateDir = resolveStateDir(options.cwd);
   const network = await readNetworkSettings(stateDir);
   const userId = options.userId ?? network?.userId ?? process.env.USER ?? "unknown";
-  const gitIdentities = network?.gitIdentities?.length
-    ? network.gitIdentities
-    : detectGitIdentities(options.cwd);
+  const gitIdentities = detectGitIdentities(options.cwd, network?.gitIdentities ?? []);
 
   const sessionId = crypto.randomUUID();
   const extraArgs = options.extraArgs ?? [];

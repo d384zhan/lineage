@@ -51,6 +51,5 @@ export function resolveGitIdentities(
   cwd: string,
   serialized = process.env[LINEAGE_GIT_IDENTITIES_ENV],
 ): GitIdentity[] {
-  const configured = parseGitIdentities(serialized);
-  return configured.length ? configured : detectGitIdentities(cwd);
+  return detectGitIdentities(cwd, parseGitIdentities(serialized));
 }

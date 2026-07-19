@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectGitIdentities, parseGitIdentity } from "@lineage/git-store";
+import {
+  detectGitIdentities,
+  parseGitIdentity,
+  resolveGitIdentities,
+} from "@lineage/git-store";
 import { resolveRepositoryAuthorship } from "./authorship";
 
 const dirs: string[] = [];
@@ -45,6 +49,18 @@ describe("Git identity attribution", () => {
       alias,
     ]);
     expect(() => parseGitIdentity("not an identity")).toThrow("Name <email@example.com>");
+  });
+
+  test("prefers the current repo identity over saved session identities", () => {
+    const cwd = repo();
+    git(cwd, ["config", "user.name", "Lorena"]);
+    git(cwd, ["config", "user.email", "lorena@example.com"]);
+    const saved = JSON.stringify([{ name: "Old Name", email: "old@example.com" }]);
+
+    expect(resolveGitIdentities(cwd, saved)).toEqual([
+      { name: "Lorena", email: "lorena@example.com" },
+      { name: "Old Name", email: "old@example.com" },
+    ]);
   });
 
   test("separates recipient commits from referenced teammate commits", async () => {
