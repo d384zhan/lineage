@@ -41,11 +41,11 @@ async function commitAs(cwd: string, name: string, email: string, file: string, 
 describe("Git identity attribution", () => {
   test("detects the repo identity and parses explicit aliases", () => {
     const cwd = repo();
-    git(cwd, ["config", "user.name", "Lorena"]);
-    git(cwd, ["config", "user.email", "lorena@example.com"]);
-    const alias = parseGitIdentity("Lorena Dev <lorena.dev@example.com>");
+    git(cwd, ["config", "user.name", "Bob"]);
+    git(cwd, ["config", "user.email", "bob@example.com"]);
+    const alias = parseGitIdentity("Bob Dev <bob.dev@example.com>");
     expect(detectGitIdentities(cwd, [alias])).toEqual([
-      { name: "Lorena", email: "lorena@example.com" },
+      { name: "Bob", email: "bob@example.com" },
       alias,
     ]);
     expect(() => parseGitIdentity("not an identity")).toThrow("Name <email@example.com>");
@@ -53,41 +53,41 @@ describe("Git identity attribution", () => {
 
   test("prefers the current repo identity over saved session identities", () => {
     const cwd = repo();
-    git(cwd, ["config", "user.name", "Lorena"]);
-    git(cwd, ["config", "user.email", "lorena@example.com"]);
+    git(cwd, ["config", "user.name", "Bob"]);
+    git(cwd, ["config", "user.email", "bob@example.com"]);
     const saved = JSON.stringify([{ name: "Old Name", email: "old@example.com" }]);
 
     expect(resolveGitIdentities(cwd, saved)).toEqual([
-      { name: "Lorena", email: "lorena@example.com" },
+      { name: "Bob", email: "bob@example.com" },
       { name: "Old Name", email: "old@example.com" },
     ]);
   });
 
   test("separates recipient commits from referenced teammate commits", async () => {
     const cwd = repo();
-    const dawangSha = await commitAs(cwd, "Dawang", "dawang@example.com", "cart.ts", "Build cart");
-    await commitAs(cwd, "Lorena", "lorena@example.com", "checkout.ts", "Build checkout");
-    git(cwd, ["notes", "add", "-m", "Structured Lineage note", dawangSha]);
+    const aliceSha = await commitAs(cwd, "Alice", "alice@example.com", "cart.ts", "Build cart");
+    await commitAs(cwd, "Bob", "bob@example.com", "checkout.ts", "Build checkout");
+    git(cwd, ["notes", "add", "-m", "Structured Lineage note", aliceSha]);
     const result = await resolveRepositoryAuthorship(
       cwd,
       {
-        userId: "lorena",
+        userId: "bob",
         provider: "claude",
-        gitIdentities: [{ name: "Lorena", email: "lorena@example.com" }],
+        gitIdentities: [{ name: "Bob", email: "bob@example.com" }],
       },
       {
         text: "Have you implemented anything?",
-        evidence: [{ kind: "commit", value: dawangSha }],
+        evidence: [{ kind: "commit", value: aliceSha }],
       },
     );
     expect(result?.recipientCommitCount).toBe(1);
     expect(result?.inspectedCommitCount).toBe(2);
     expect(result?.recentRecipientCommits[0]?.summary).toBe("Build checkout");
     expect(result?.referencedCommits[0]).toMatchObject({
-      sha: dawangSha,
+      sha: aliceSha,
       summary: "Build cart",
       belongsToRecipient: false,
-      author: { name: "Dawang", email: "dawang@example.com" },
+      author: { name: "Alice", email: "alice@example.com" },
     });
   });
 });

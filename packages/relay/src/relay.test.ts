@@ -179,25 +179,25 @@ describe("relay", () => {
 
   test("resolves an online recipient by email prefix or Git name", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
-    const dawang = await join(relay.url, {
-      userId: "dawang.zhang24@gmail.com",
+    const alice = await join(relay.url, {
+      userId: "alice.smith@example.com",
       provider: "claude",
-      gitIdentities: [{ name: "Dawang Zhang", email: "dawang@example.com" }],
+      gitIdentities: [{ name: "Alice Smith", email: "alice@example.com" }],
     });
-    const lorena = await join(relay.url, { userId: "lorena@example.com", provider: "claude" });
+    const bob = await join(relay.url, { userId: "bob@example.com", provider: "claude" });
     const requestId = crypto.randomUUID();
-    lorena.send(
+    bob.send(
       envelope({
         type: "question.ask",
-        sender: { userId: "lorena@example.com", provider: "claude" },
-        recipient: "dawang",
+        sender: { userId: "bob@example.com", provider: "claude" },
+        recipient: "alice",
         requestId,
         payload: { text: "What was the exact prompt?", evidence: [] },
       }),
     );
 
-    const delivered = await dawang.next((message) => message.type === "question.ask");
-    expect(delivered.recipient).toBe("dawang.zhang24@gmail.com");
+    const delivered = await alice.next((message) => message.type === "question.ask");
+    expect(delivered.recipient).toBe("alice.smith@example.com");
   });
 
   test("returns candidates when a recipient alias is ambiguous", async () => {
@@ -210,12 +210,12 @@ describe("relay", () => {
       userId: "joe.two@example.com",
       gitIdentities: [{ name: "Joe Two", email: "joe.two@example.com" }],
     });
-    const asker = await join(relay.url, { userId: "lorena@example.com" });
+    const asker = await join(relay.url, { userId: "bob@example.com" });
     const requestId = crypto.randomUUID();
     asker.send(
       envelope({
         type: "question.ask",
-        sender: { userId: "lorena@example.com" },
+        sender: { userId: "bob@example.com" },
         recipient: "joe",
         requestId,
         payload: { text: "Who changed this?", evidence: [] },
@@ -500,12 +500,12 @@ describe("relay with Auth0 verification", () => {
       auth: { issuer: issuer.issuer, audience: AUDIENCE, jwks: issuer.jwks },
       authorize: async ({ actor }) => {
         requested.push(actor.userId);
-        return actor.userId === "lorena@example.com";
+        return actor.userId === "bob@example.com";
       },
     });
-    const token = await issuer.sign({ sub: "auth0|2", email: "lorena@example.com" });
+    const token = await issuer.sign({ sub: "auth0|2", email: "bob@example.com" });
     const approved = await connect(relay.url);
-    const approvedHello = authHello("lorena@example.com", token, "no-shared-secret");
+    const approvedHello = authHello("bob@example.com", token, "no-shared-secret");
     approved.send(approvedHello);
     await approved.next(
       (message) => message.type === "ack" && message.payload.messageId === approvedHello.id,
@@ -516,6 +516,6 @@ describe("relay with Auth0 verification", () => {
     rejected.send(authHello("mallory@example.com", rejectedToken, "no-shared-secret"));
     const error = await rejected.next((message) => message.type === "error");
     expect(error.type === "error" && error.payload.code).toBe("access_denied");
-    expect(requested).toEqual(["lorena@example.com", "mallory@example.com"]);
+    expect(requested).toEqual(["bob@example.com", "mallory@example.com"]);
   });
 });

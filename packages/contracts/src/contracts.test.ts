@@ -80,8 +80,8 @@ describe("shared contract fixtures", () => {
   test("renders approved context without requiring a reply", () => {
     const prompt = renderInboundAgentRequest({
       requestId: "context-1",
-      sender: { userId: "lorena" },
-      recipient: { userId: "dawang" },
+      sender: { userId: "bob" },
+      recipient: { userId: "alice" },
       question: {
         kind: "context",
         text: "I am changing the cart schema for reservation expiry.",

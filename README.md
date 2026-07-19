@@ -350,8 +350,6 @@ bun run typecheck
 bun test
 ```
 
-See [CONTRACTS.md](./CONTRACTS.md) for protocol and persistence contracts.
-
 ## Roadmap
 
 - Durable delivery for offline recipients

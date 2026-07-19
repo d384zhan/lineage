@@ -230,7 +230,7 @@ describe("network commands", () => {
       accessToken: "header.payload.signature",
       refreshToken: "refresh-1",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-      identity: "lorena@example.com",
+      identity: "bob@example.com",
     });
     const joinWithLogin = createJoinCommand(userStateDir);
 
@@ -243,7 +243,7 @@ describe("network commands", () => {
       { cwd: repo, json: true },
     ) as { userId: string; relayUrl: string };
 
-    expect(repeated.userId).toBe("lorena@example.com");
+    expect(repeated.userId).toBe("bob@example.com");
     expect(repeated.relayUrl).toBe("ws://192.168.1.10:8787");
   });
 
@@ -255,7 +255,7 @@ describe("network commands", () => {
     const authorize = await createHostMembershipAuthorizer({
       repoId: "repo-1",
       stateDir,
-      hostIdentity: "dawang@example.com",
+      hostIdentity: "alice@example.com",
       prompt: async (question) => {
         prompts.push(question);
         return answers.shift() ?? "no";
@@ -263,23 +263,23 @@ describe("network commands", () => {
       print: () => {},
     });
 
-    expect(await authorize({ repoId: "repo-1", actor: { userId: "dawang@example.com" } })).toBeTrue();
-    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
-    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "alice@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "bob@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "bob@example.com" } })).toBeTrue();
     expect(await authorize({ repoId: "other-repo", actor: { userId: "mallory@example.com" } })).toBeFalse();
     expect(prompts).toHaveLength(1);
     expect((await readMembershipSettings(stateDir)).members.map((member) => member.identity)).toEqual([
-      "dawang@example.com",
-      "lorena@example.com",
+      "alice@example.com",
+      "bob@example.com",
     ]);
 
-    await membersCommand.run(["revoke", "lorena@example.com"], { cwd: repo, json: true });
-    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeFalse();
+    await membersCommand.run(["revoke", "bob@example.com"], { cwd: repo, json: true });
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "bob@example.com" } })).toBeFalse();
     expect(prompts).toHaveLength(2);
     expect((await readMembershipSettings(stateDir)).members).toHaveLength(1);
 
-    await membersCommand.run(["approve", "lorena@example.com"], { cwd: repo, json: true });
-    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
+    await membersCommand.run(["approve", "bob@example.com"], { cwd: repo, json: true });
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "bob@example.com" } })).toBeTrue();
     expect(prompts).toHaveLength(2);
   });
 
