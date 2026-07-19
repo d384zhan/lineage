@@ -224,17 +224,34 @@ refs and notes.
 
 ## How it works
 
-```text
-Claude Code / Codex
-        │ MCP
-        ▼
-local Lineage daemon ─── private prompt index + Git history
-        │ WebSocket
-        ▼
-repository relay
-        │
-        ▼
-teammate daemon ─── approval ─── teammate agent
+```mermaid
+flowchart LR
+  subgraph asker["Asking machine"]
+    direction TB
+    A["Claude Code / Codex"] -->|lineage_ask| AM["MCP server"]
+    AM --> AD["Local daemon"]
+    AG["Git history"] -->|line trace| AM
+    AD -->|result or channel event| A
+  end
+
+  R["Repository relay<br/>room routing + Auth0"]
+
+  subgraph recipient["Recipient machine"]
+    direction TB
+    RD["Local daemon"] -->|incoming message| G{"Approve?"}
+    G -->|dispatch| B["Claude Code / Codex"]
+    G -->|manual answer or reject| RD
+    B -->|lineage_reply| RD
+
+    RG["Git history"] -->|authorship + decisions| RD
+    PI["Prompt index"] -->|ranked pointers| RD
+    NL["Native session JSONL"] -->|reread after approval| RD
+  end
+
+  AD -->|WebSocket request| R
+  R -->|repository route| RD
+  RD -->|structured response| R
+  R -->|completed response| AD
 ```
 
 - The **MCP server** exposes history, coordination, approval, and reply tools.
