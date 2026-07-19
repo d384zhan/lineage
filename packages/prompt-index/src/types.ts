@@ -10,6 +10,8 @@ export interface PromptPointer {
 export interface PromptIndexEntry extends PromptPointer {
   id: string;
   sessionId: string;
+  /** Codex parent thread when this prompt came from a delegated subagent. */
+  parentSessionId?: string;
   promptId?: string;
   timestamp: string;
   cwd?: string;

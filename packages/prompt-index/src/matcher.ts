@@ -46,6 +46,10 @@ function scoreEntry(entry: PromptIndexEntry, trace: CodeLineTrace, queryHashes: 
   if (!Number.isFinite(distanceHours) || distanceHours > 24 * 14) return undefined;
   let score = 0;
   const reasons: string[] = [];
+  if (!entry.parentSessionId) {
+    score += 15;
+    reasons.push("top-level agent session");
+  }
   const tracePath = canonicalRepoPath(trace.path);
   const fileMatch = entry.files.some((file) => {
     const indexedPath = canonicalRepoPath(file);

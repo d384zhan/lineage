@@ -99,4 +99,41 @@ describe("private global prompt index", () => {
     expect(result.candidates[0]?.entry.sessionId).toBe("session-auth");
     expect(await readExactPrompt(result.candidates[0]!.entry)).toContain("httpOnly cookie");
   });
+
+  test("prefers the originating human prompt over tied Codex subagent prompts", async () => {
+    const repo = temp("lineage-parent-prompt-repo-");
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "Test User"]);
+    mkdirSync(join(repo, ".git", "lineage"), { recursive: true });
+    mkdirSync(join(repo, "src"), { recursive: true });
+    await Bun.write(join(repo, ".git", "lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
+    const timestamp = new Date(Date.now() - 1_000).toISOString();
+    const claudeRoot = temp("lineage-parent-prompt-claude-");
+    const codexRoot = temp("lineage-parent-prompt-codex-");
+    await Bun.write(join(codexRoot, "root.jsonl"), [
+      JSON.stringify({ type: "session_meta", timestamp, payload: { id: "root-session", cwd: repo, source: "cli" } }),
+      JSON.stringify({ type: "event_msg", timestamp, payload: { type: "user_message", message: "Implement inventory reservations in src/cart.ts" } }),
+      JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call", name: "apply_patch", arguments: JSON.stringify({ patch: "*** Update File: src/cart.ts" }) } }),
+    ].join("\n") + "\n");
+    await Bun.write(join(codexRoot, "subagent.jsonl"), [
+      JSON.stringify({ type: "session_meta", timestamp, payload: { id: "subagent-session", cwd: repo, parent_thread_id: "root-session", source: { subagent: { other: "reviewer" } } } }),
+      JSON.stringify({ type: "event_msg", timestamp, payload: { type: "user_message", message: "Review inventory reservation implementation cart stock availability in src/cart.ts" } }),
+      JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call", name: "apply_patch", arguments: JSON.stringify({ patch: "*** Update File: src/cart.ts" }) } }),
+    ].join("\n") + "\n");
+    await Bun.write(join(repo, "src", "cart.ts"), "export const reserved = true;\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-qm", "Implement inventory reservations"]);
+
+    const index = await refreshPromptIndex({
+      indexPath: join(repo, ".git", "lineage", "index.json"),
+      claudeRoot,
+      codexRoot,
+    });
+    expect(index.entries.find((entry) => entry.sessionId === "subagent-session")?.parentSessionId)
+      .toBe("root-session");
+    const result = await matchPromptsForLine(repo, "src/cart.ts:1", "repo-1", index.entries);
+    expect(result.candidates[0]?.entry.sessionId).toBe("root-session");
+    expect(result.candidates[0]!.score - result.candidates[1]!.score).toBeGreaterThanOrEqual(10);
+  });
 });

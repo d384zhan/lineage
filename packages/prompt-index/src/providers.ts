@@ -57,6 +57,7 @@ function claudePrompt(record: Record<string, unknown>, fallback: string): Parsed
 
 interface CodexState {
   sessionId: string;
+  parentSessionId?: string;
   cwd?: string;
   branch?: string;
 }
@@ -67,6 +68,7 @@ function updateCodexState(record: Record<string, unknown>, state: CodexState): v
   if (typeof payload !== "object" || payload === null) return;
   const data = payload as Record<string, unknown>;
   if (typeof data.id === "string") state.sessionId = data.id;
+  if (typeof data.parent_thread_id === "string") state.parentSessionId = data.parent_thread_id;
   if (typeof data.cwd === "string") state.cwd = data.cwd;
   if (typeof data.gitBranch === "string") state.branch = data.gitBranch;
   if (typeof data.branch === "string") state.branch = data.branch;
@@ -186,6 +188,7 @@ export async function parseTranscript(
       sourceLine: index + 1,
       promptHash: sha256(prompt.content),
       sessionId: prompt.sessionId,
+      ...(state.parentSessionId ? { parentSessionId: state.parentSessionId } : {}),
       ...(prompt.promptId ? { promptId: prompt.promptId } : {}),
       timestamp: prompt.timestamp,
       ...(prompt.cwd ? { cwd: resolve(prompt.cwd) } : {}),
