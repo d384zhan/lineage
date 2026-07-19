@@ -99,11 +99,11 @@ For computers on different networks, laptop A can run
   to Git or the relay outside that answer.
 - The local inbox persists under `.git/lineage/`. Matched exact prompts remain
   memory-only; a restarted dispatch returns to pending and requires approval again.
-- Approved agent dispatches run the recipient's unconditional command-based
+- Active-session dispatches run the recipient's unconditional command-based
   `UserPromptSubmit` hooks from Claude or Codex config. Plain Claude output and
   Codex `additionalContext` output are normalized into the same agent request.
-  Hook context remains memory-only and never enters Git, the inbox file, or the
-  relay.
+  Standalone headless agents use their native hook lifecycle instead. Hook
+  context remains memory-only and never enters Git, the inbox file, or the relay.
 - Both Claude Code and Codex native session logs are indexed. `lineage run`
   refreshes the index after the agent exits; `lineage index` imports existing
   history, including sessions created before Lineage was installed.

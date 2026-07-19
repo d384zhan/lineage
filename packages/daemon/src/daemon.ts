@@ -109,12 +109,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const resolveContext = options.contextResolver ?? ((prompt: string) =>
     runUserPromptContextHooks({ provider: network.provider, cwd: options.cwd, prompt }));
 
-  async function approveForAgent(entry: InboxEntry) {
-    try {
-      const context = await resolveContext(entry.question.text);
-      if (context.length) inbox.attachLocalContext(entry.requestId, context);
-    } catch (error) {
-      io.print(`context hooks skipped: ${error instanceof Error ? error.message : String(error)}`);
+  async function approveForAgent(entry: InboxEntry, addLocalContext = false) {
+    if (addLocalContext) {
+      try {
+        const context = await resolveContext(entry.question.text);
+        if (context.length) inbox.attachLocalContext(entry.requestId, context);
+      } catch (error) {
+        io.print(`context hooks skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     try {
       const quotedPrompt = await resolvePrompt(entry.question);
@@ -176,7 +178,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       throw new Error(`Request ${input.requestId} is ${entry.status}, not pending`);
     }
     if (input.action === "dispatch") {
-      const request = await approveForAgent(entry);
+      const request = await approveForAgent(entry, true);
       return {
         action: "dispatch",
         request,
