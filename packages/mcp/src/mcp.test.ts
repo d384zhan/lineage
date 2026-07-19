@@ -385,12 +385,11 @@ describe("mcp server", () => {
         JSON.stringify(notification.params).includes(requestId)
       ),
     ).toBeFalse();
-
-    const accepted = await sessionB.callTool(MCP_TOOL_NAMES.respond, {
-      requestId,
-      action: "dispatch",
-    });
-    expect(accepted.text).toContain("No reply is required");
+    const notification = sessionB.notifications.find((candidate) =>
+      JSON.stringify(candidate.params).includes(requestId)
+    );
+    expect(JSON.stringify(notification?.params)).toContain("added automatically");
+    expect(JSON.stringify(notification?.params)).not.toContain("accept into this session");
     await until(() => daemon.outbox.get(requestId)?.status === "delivered");
   });
 });

@@ -10,6 +10,7 @@ import {
   LINEAGE_CHANNEL_ENV,
   LINEAGE_PROVIDER_ENV,
   LINEAGE_SESSION_ID_ENV,
+  LINEAGE_USER_ID_ENV,
 } from "@lineage/contracts";
 import { createTools } from "./tools";
 
@@ -59,6 +60,7 @@ const notifiedOutgoing = new Set<string>();
 const outgoingStatuses = new Map<string, string>();
 const channelStartedAt = Date.now();
 const currentSessionId = process.env[LINEAGE_SESSION_ID_ENV];
+const currentUserId = process.env[LINEAGE_USER_ID_ENV];
 let daemon: DaemonClient | undefined;
 let polling = false;
 const poll = async () => {
@@ -80,6 +82,30 @@ const poll = async () => {
         (currentSessionId && entry.question.sourceSessionId === currentSessionId)
       ) continue;
       const kind = entry.question.kind ?? "question";
+      const isOwnContext = kind === "context" && entry.sender.userId === currentUserId;
+      if (isOwnContext) {
+        const accepted = await daemon.respond({
+          requestId: entry.requestId,
+          action: "dispatch",
+        }) as { rendered?: string };
+        await server.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: [
+              "Lineage context from your other session was added automatically.",
+              accepted.rendered ?? entry.question.text,
+            ].join("\n"),
+            meta: {
+              source: "lineage",
+              request_id: entry.requestId,
+              sender: entry.sender.userId,
+              auto_accepted: true,
+            },
+          },
+        } as Parameters<typeof server.notification>[0]);
+        notifiedInbound.add(entry.requestId);
+        continue;
+      }
       await server.notification({
         method: "notifications/claude/channel",
         params: {
