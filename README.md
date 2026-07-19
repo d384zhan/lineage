@@ -2,6 +2,8 @@
 
 Git blame tells you who changed a line. Lineage tells your coding agent why.
 
+https://github.com/user-attachments/assets/f19a5a94-aa0e-470c-8571-acc818a92c6a
+
 Lineage connects Claude Code and Codex so developers can recover the prompt,
 intent, assumptions, and chronology behind a change. Teammates can ask why code
 exists, send context between sessions, and coordinate without leaving the CLI.
