@@ -18,6 +18,7 @@ export { DAEMON_SECRET_HEADER } from "./http";
 export type { CoreRuntime, RuntimeOpener } from "./http";
 export {
   AuthSettingsSchema,
+  HostSettingsSchema,
   NetworkSettingsSchema,
   DaemonInfoSchema,
   deleteAuthSettings,
@@ -25,14 +26,17 @@ export {
   findRepoRoot,
   readAuthSettings,
   readDaemonInfo,
+  readHostSettings,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
+  resolveUserStateDir,
   writeAuthSettings,
   writeDaemonInfo,
+  writeHostSettings,
   writeNetworkSettings,
 } from "./files";
-export type { AuthSettings, DaemonInfo, NetworkSettings } from "./files";
+export type { AuthSettings, DaemonInfo, HostSettings, NetworkSettings } from "./files";
 export {
   decodeJwtPayload,
   ensureFreshAuth,

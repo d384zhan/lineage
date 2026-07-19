@@ -322,11 +322,15 @@ describe("relay with Auth0 verification", () => {
     });
   }
 
-  function authHello(userId: string, accessToken: string | undefined): WireEnvelope {
+  function authHello(
+    userId: string,
+    accessToken: string | undefined,
+    roomToken = TOKEN,
+  ): WireEnvelope {
     return envelope({
       type: "hello",
       sender: { userId, provider: "claude" },
-      payload: accessToken ? { roomToken: "ignored", accessToken } : { roomToken: "ignored" },
+      payload: accessToken ? { roomToken, accessToken } : { roomToken },
     });
   }
 
@@ -369,6 +373,16 @@ describe("relay with Auth0 verification", () => {
     client.send(authHello("alice@example.com", token));
     const error = await client.next((m) => m.type === "error");
     expect(error.type === "error" && error.payload.code).toBe("invalid_token");
+    await client.closed;
+  });
+
+  test("rejects a valid identity with the wrong room token", async () => {
+    relay = await startAuthRelay();
+    const token = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const client = await connect(relay.url);
+    client.send(authHello("alice@example.com", token, "wrong-room"));
+    const error = await client.next((message) => message.type === "error");
+    expect(error.type === "error" && error.payload.message).toContain("Room token rejected");
     await client.closed;
   });
 

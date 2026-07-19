@@ -84,7 +84,8 @@ configuration ignores it and keeps room-token behavior. A relay started
 it against the issuer's JWKS (RS256, `iss`/`aud`/`exp`), derives the caller's
 identity as `email claim ?? sub`, and rejects the hello with `invalid_token`
 unless `sender.userId` equals that identity. Room-token equality is not
-checked in this mode; the JWT is the room gate. After a successful hello the
+optional in this mode: the relay requires both the room token and JWT. After a
+successful hello the
 relay also rejects any later envelope whose `sender.userId` differs from the
 authenticated one.
 

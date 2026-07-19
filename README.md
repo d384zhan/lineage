@@ -52,7 +52,7 @@ commit. Rerun it after installing another agent CLI.
 
 ```bash
 lineage init                       # local setup; no files to commit
-lineage host --port 8787           # terminal 1 — prints the room token
+lineage host --port 8787           # terminal 1; creates or reuses this repo's room token
 lineage join --relay ws://localhost:8787 --token <token> --user alice --provider codex
 lineage run codex                  # terminal 2 — starts messaging invisibly
 ```
@@ -73,8 +73,8 @@ For computers on different networks, laptop A can run
 
 By default the relay trusts self-declared userIds gated by the shared room
 token. With Auth0 enabled, `lineage login` proves who you are in the browser
-once (OAuth Device Authorization Flow), the daemon connects with that JWT, and
-the relay verifies it against the tenant's JWKS — a joiner cannot claim
+once per computer (OAuth Device Authorization Flow), the daemon connects with
+that JWT, and the relay verifies it against the tenant's JWKS — a joiner cannot claim
 someone else's name, and every answer is tied to a verified identity.
 
 ### One-time tenant setup
@@ -108,22 +108,30 @@ someone else's name, and every answer is tied to a verified identity.
 ### Using it
 
 ```bash
-# Relay host — require verified identities:
-lineage host --port 8787 --auth0-domain dev-xyz.us.auth0.com --auth0-audience "https://lineage/api"
-
-# Each teammate, inside the repo (once; settings are remembered for re-login):
+# Each teammate signs into Lineage once on their computer:
 lineage login --domain dev-xyz.us.auth0.com --client-id <client-id> --audience "https://lineage/api"
-lineage join --relay ws://<host>:8787 --token <token> --user <your-login-email>
-lineage daemon
+
+# The host automatically uses that saved Auth0 tenant and reuses this repo's token:
+lineage host --port 8787
+
+# Each teammate pastes the printed command once; their verified userId is inferred:
+lineage join --relay ws://<host>:8787 --token <token>
+lineage run claude
 ```
 
 The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
-and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity —
-the daemon uses it as your userId (overriding `join --user` if they differ), so
-teammates `lineage ask <that-identity>`. Tokens are stored in
-`.git/lineage/auth.json` (never committed) and refreshed automatically;
-`lineage logout` removes them. A relay started without the `--auth0-*` flags
-keeps the plain room-token behavior, so offline demos and tests work unchanged.
+and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity.
+The daemon uses it as your userId, so teammates `lineage ask <that-identity>`.
+Login is stored at `~/.lineage/auth.json` with owner-only permissions and
+refreshes automatically. `lineage logout` removes it for the whole computer.
+Use `lineage host --no-auth0` to deliberately run a room-token-only relay.
+Authenticated relays require both the saved room token and a valid identity.
+
+The first `lineage host` creates `.git/lineage/host.json`; later starts reuse
+the same token and port. A teammate only runs the printed `lineage join`
+command once because their relay URL and token are also saved under `.git`.
+If the host's LAN IP changes, rerun `lineage join --relay ws://<new-ip>:<port>`;
+the saved token and user identity fill in automatically.
 
 ### Demo beats
 

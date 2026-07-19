@@ -19,8 +19,8 @@ export interface RelayOptions {
   /** Shared token for every room, or a per-room resolver. */
   token: RoomTokenResolver;
   /**
-   * When set, hello frames must carry a JWT issued by this tenant; the room
-   * token is not checked and userIds must match the token's identity.
+   * When set, hello frames must also carry a JWT issued by this tenant and
+   * userIds must match the token's identity.
    */
   auth?: RelayAuthOptions;
   hostname?: string;
@@ -107,6 +107,12 @@ export function startRelay(options: RelayOptions): RelayHandle {
       client.close(4001, "not authenticated");
       return;
     }
+    const expected = resolveToken(envelope.repoId);
+    if (!expected || envelope.payload.roomToken !== expected) {
+      sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
+      client.close(4001, "invalid room token");
+      return;
+    }
     if (verifier) {
       const token = envelope.payload.accessToken;
       if (!token) {
@@ -136,13 +142,6 @@ export function startRelay(options: RelayOptions): RelayHandle {
           `userId "${envelope.sender.userId}" does not match authenticated identity "${identity}"`,
         );
         client.close(4001, "identity mismatch");
-        return;
-      }
-    } else {
-      const expected = resolveToken(envelope.repoId);
-      if (!expected || envelope.payload.roomToken !== expected) {
-        sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
-        client.close(4001, "invalid token");
         return;
       }
     }

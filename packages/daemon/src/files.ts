@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
@@ -26,9 +27,16 @@ export const NetworkSettingsSchema = z.object({
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>;
 
+export const HostSettingsSchema = z.object({
+  roomToken: z.string().min(1),
+  port: z.number().int().min(0).max(65535),
+});
+
+export type HostSettings = z.infer<typeof HostSettingsSchema>;
+
 /**
- * Auth0 login state written by `lineage login`. Lives under `.git/lineage`
- * next to network.json and is never committed.
+ * Auth0 login state written by `lineage login`. Lives under the user's global
+ * Lineage directory because login identity belongs to a person, not a repo.
  */
 export const AuthSettingsSchema = z.object({
   /** Tenant domain, e.g. "dev-abc.us.auth0.com" (scheme optional). */
@@ -54,10 +62,16 @@ export const DaemonInfoSchema = z.object({
 export type DaemonInfo = z.infer<typeof DaemonInfoSchema>;
 
 const NETWORK_FILE = "network.json";
+const HOST_FILE = "host.json";
 const DAEMON_FILE = "daemon.json";
 export const INBOX_FILE = "inbox.json";
 export const OUTBOX_FILE = "outbox.json";
 const AUTH_FILE = "auth.json";
+
+/** Machine-wide Lineage state. Override in tests with LINEAGE_HOME. */
+export function resolveUserStateDir(override = process.env["LINEAGE_HOME"]): string {
+  return override ?? join(homedir(), ".lineage");
+}
 
 export function findGitDir(cwd: string): string | undefined {
   let current = cwd;
@@ -116,10 +130,32 @@ export async function writeNetworkSettings(
   settings: NetworkSettings,
 ): Promise<void> {
   mkdirSync(stateDir, { recursive: true });
+  const path = join(stateDir, NETWORK_FILE);
   await Bun.write(
-    join(stateDir, NETWORK_FILE),
+    path,
     JSON.stringify(NetworkSettingsSchema.parse(settings), null, 2),
   );
+  chmodSync(path, 0o600);
+}
+
+export async function readHostSettings(
+  stateDir: string,
+): Promise<HostSettings | undefined> {
+  const raw = await readJsonFile(join(stateDir, HOST_FILE));
+  return raw === undefined ? undefined : HostSettingsSchema.parse(raw);
+}
+
+export async function writeHostSettings(
+  stateDir: string,
+  settings: HostSettings,
+): Promise<void> {
+  mkdirSync(stateDir, { recursive: true });
+  const path = join(stateDir, HOST_FILE);
+  await Bun.write(
+    path,
+    JSON.stringify(HostSettingsSchema.parse(settings), null, 2),
+  );
+  chmodSync(path, 0o600);
 }
 
 export async function readAuthSettings(
@@ -130,14 +166,16 @@ export async function readAuthSettings(
 }
 
 export async function writeAuthSettings(
-  stateDir: string,
+  userStateDir: string,
   settings: AuthSettings,
 ): Promise<void> {
-  mkdirSync(stateDir, { recursive: true });
+  mkdirSync(userStateDir, { recursive: true });
+  const path = join(userStateDir, AUTH_FILE);
   await Bun.write(
-    join(stateDir, AUTH_FILE),
+    path,
     JSON.stringify(AuthSettingsSchema.parse(settings), null, 2),
   );
+  chmodSync(path, 0o600);
 }
 
 export function deleteAuthSettings(stateDir: string): void {

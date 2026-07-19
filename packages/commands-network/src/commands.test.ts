@@ -7,11 +7,12 @@ import {
   readAuthSettings,
   readNetworkSettings,
   startDaemon,
+  writeAuthSettings,
   type ApprovalIo,
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createInitCommand, createLoginCommand, identityCommand, inboxCommand, initCommand, joinCommand, logoutCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -203,6 +204,34 @@ describe("network commands", () => {
       provider: "claude",
       gitIdentities: [{ name: "Alice", email: "alice@example.com" }],
     });
+  });
+
+  test("join uses machine login identity and remembers room credentials", async () => {
+    const repo = await makeTempRepo();
+    const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+    tempDirs.push(userStateDir);
+    await writeAuthSettings(userStateDir, {
+      domain: "tenant.example.com",
+      clientId: "client-1",
+      audience: "https://lineage.example/api",
+      accessToken: "header.payload.signature",
+      refreshToken: "refresh-1",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      identity: "lorena@example.com",
+    });
+    const joinWithLogin = createJoinCommand(userStateDir);
+
+    await joinWithLogin.run(
+      ["--relay", "ws://192.168.1.10:8787", "--token", TOKEN],
+      { cwd: repo, json: true },
+    );
+    const repeated = await joinWithLogin.run(
+      ["--provider", "claude"],
+      { cwd: repo, json: true },
+    ) as { userId: string; relayUrl: string };
+
+    expect(repeated.userId).toBe("lorena@example.com");
+    expect(repeated.relayUrl).toBe("ws://192.168.1.10:8787");
   });
 
   test("adds Git identity aliases without requiring another join", async () => {
@@ -426,9 +455,12 @@ describe("login command", () => {
     });
     try {
       const printed: string[] = [];
+      const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+      tempDirs.push(userStateDir);
       const login = createLoginCommand({
         sleep: async () => {},
         print: (line) => printed.push(line),
+        userStateDir,
       });
       const result = await login.run(
         [
@@ -444,8 +476,7 @@ describe("login command", () => {
       });
       expect(printed.join("\n")).toContain("ABCD-EFGH");
 
-      const stateDir = join(repo, ".git", "lineage");
-      const stored = await readAuthSettings(stateDir);
+      const stored = await readAuthSettings(userStateDir);
       expect(stored!.accessToken).toBe(accessToken);
       expect(stored!.identity).toBe("loren@example.com");
 
@@ -456,8 +487,8 @@ describe("login command", () => {
         expiresAt: expect.any(String),
       });
 
-      await logoutCommand.run([], { cwd: repo, json: true });
-      expect(await readAuthSettings(stateDir)).toBeUndefined();
+      await createLogoutCommand(userStateDir).run([], { cwd: repo, json: true });
+      expect(await readAuthSettings(userStateDir)).toBeUndefined();
     } finally {
       auth0.stop(true);
     }
@@ -474,7 +505,9 @@ describe("login command", () => {
     delete process.env["LINEAGE_AUTH0_CLIENT_ID"];
     delete process.env["LINEAGE_AUTH0_AUDIENCE"];
     try {
-      const login = createLoginCommand({ print: () => {} });
+      const userStateDir = mkdtempSync(join(tmpdir(), "lineage-user-"));
+      tempDirs.push(userStateDir);
+      const login = createLoginCommand({ print: () => {}, userStateDir });
       const error = await login
         .run([], { cwd: repo, json: false })
         .then(() => undefined)

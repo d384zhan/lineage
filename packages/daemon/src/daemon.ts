@@ -23,9 +23,12 @@ import {
   deleteDaemonInfo,
   INBOX_FILE,
   OUTBOX_FILE,
+  readAuthSettings,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
+  resolveUserStateDir,
+  writeAuthSettings,
   writeDaemonInfo,
   type AuthSettings,
   type NetworkSettings,
@@ -49,9 +52,11 @@ export interface DaemonOptions {
   openRuntime?: RuntimeOpener;
   answerer?: AgentAnswerer;
   stateDir?: string;
+  /** Machine-wide auth directory; defaults to ~/.lineage. */
+  authDir?: string;
   repoId?: string;
   network?: NetworkSettings;
-  /** Auth0 login state; undefined loads `.git/lineage/auth.json`, null skips. */
+  /** Auth0 login state; undefined loads machine-wide state, null skips. */
   auth?: AuthSettings | null;
   httpPort?: number;
   resolvePrompt?: PromptResolver;
@@ -86,8 +91,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const gitIdentities = detectGitIdentities(options.cwd, network.gitIdentities ?? []);
   let auth: AuthSettings | undefined;
   if (options.auth === undefined) {
+    const authDir = options.authDir ?? resolveUserStateDir();
     try {
-      auth = await ensureFreshAuth(stateDir);
+      // Migrate auth written by older versions from repo-local state.
+      if (!(await readAuthSettings(authDir))) {
+        const legacy = await readAuthSettings(stateDir);
+        if (legacy) await writeAuthSettings(authDir, legacy);
+      }
+      auth = await ensureFreshAuth(authDir);
     } catch (error) {
       io.print(
         `Auth0 token refresh failed (${
