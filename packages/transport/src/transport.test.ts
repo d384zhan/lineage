@@ -55,6 +55,27 @@ function presenceEnvelope(actor: Actor): WireEnvelope {
 }
 
 describe("WebSocketLineageTransport", () => {
+  test("fails a stalled WebSocket handshake on the connection deadline", async () => {
+    const stalled = Bun.serve({
+      port: 0,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+    const transport = new WebSocketLineageTransport({ connectTimeoutMs: 50 });
+    transports.push(transport);
+    try {
+      const error = await transport.connect({
+        relayUrl: `ws://127.0.0.1:${stalled.port}`,
+        repoId: "repo-1",
+        roomToken: TOKEN,
+        actor: { userId: "alice" },
+      }).then(() => undefined).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("Timed out connecting");
+    } finally {
+      stalled.stop(true);
+    }
+  });
+
   test("connect succeeds with a valid token and fails with a bad one", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     await connected({ userId: "alice", provider: "claude" });

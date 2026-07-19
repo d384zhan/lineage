@@ -90,18 +90,22 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   }
 
   let ownedDaemon: DaemonHandle | undefined;
+  let agentOwnsTerminal = false;
   try {
     const daemon = await DaemonClient.open(options.cwd);
     userId = (await daemon.status()).actor.userId;
   } catch {
     if (network) {
+      print(`Connecting to ${network.relayUrl} as ${network.userId}...`);
       ownedDaemon = await startDaemon({
         cwd: options.cwd,
         approvalMode: "external",
         io: {
           // The agent TUI owns stdout after launch. Background daemon output
           // would be interpreted as text typed into its active composer.
-          print: () => {},
+          print: (line) => {
+            if (!agentOwnsTerminal) print(line);
+          },
           prompt: async () => {
             throw new Error("Interactive approval belongs in the active coding-agent session");
           },
@@ -115,6 +119,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   }
 
   print(`Starting ${options.provider} (lineage session ${sessionId})...`);
+  agentOwnsTerminal = true;
   const spawn = options.spawn ?? defaultSpawn;
   let exitCode: number;
   try {

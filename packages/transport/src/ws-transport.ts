@@ -36,6 +36,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 export interface TransportOptions {
+  connectTimeoutMs?: number;
   ackTimeoutMs?: number;
   askTimeoutMs?: number;
   initialBackoffMs?: number;
@@ -53,6 +54,7 @@ export class WebSocketLineageTransport implements LineageTransport {
   private readonly pendingAcks = new Map<string, Deferred<Ack>>();
   private readonly pendingAsks = new Map<string, Deferred<AgentAnswer>>();
   private readonly handlers = new Set<MessageHandler>();
+  private readonly connectTimeoutMs: number;
   private readonly ackTimeoutMs: number;
   private readonly askTimeoutMs: number | undefined;
   private readonly initialBackoffMs: number;
@@ -60,6 +62,7 @@ export class WebSocketLineageTransport implements LineageTransport {
   private readonly log: (line: string) => void;
 
   constructor(options: TransportOptions = {}) {
+    this.connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
     this.ackTimeoutMs = options.ackTimeoutMs ?? 10_000;
     this.askTimeoutMs = options.askTimeoutMs;
     this.initialBackoffMs = options.initialBackoffMs ?? 500;
@@ -171,9 +174,33 @@ export class WebSocketLineageTransport implements LineageTransport {
     });
     ws.addEventListener("close", () => this.handleClose(ws));
     await new Promise<void>((resolve, reject) => {
-      ws.addEventListener("open", () => resolve());
-      ws.addEventListener("error", () =>
-        reject(new Error(`Could not reach relay at ${config.relayUrl}`)),
+      let settled = false;
+      const finish = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        action();
+      };
+      const timer = setTimeout(() => {
+        finish(() => {
+          ws.close();
+          reject(
+            new Error(
+              `Timed out connecting to ${config.relayUrl} after ${this.connectTimeoutMs}ms. Check the host address, port, firewall, and network reachability.`,
+            ),
+          );
+        });
+      }, this.connectTimeoutMs);
+      ws.addEventListener("open", () => finish(resolve), { once: true });
+      ws.addEventListener(
+        "error",
+        () => finish(() => reject(new Error(`Could not reach relay at ${config.relayUrl}`))),
+        { once: true },
+      );
+      ws.addEventListener(
+        "close",
+        () => finish(() => reject(new Error(`Relay closed before connecting at ${config.relayUrl}`))),
+        { once: true },
       );
     });
     const hello = this.buildEnvelope({
