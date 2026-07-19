@@ -17,6 +17,7 @@ const groundingInstructions = [
   "Lineage questions about why code exists, implementation choices, regressions, or design decisions must be code-grounded.",
   "Before calling lineage_ask for one of these questions, inspect the repository and pass the narrowest relevant path:line in the line argument.",
   "The line enables Git blame and private originating-prompt matching. Omit it only for genuinely broad status or coordination questions.",
+  "Recipients may be addressed by full identity, email prefix, or a unique Git-name token. If Lineage reports an ambiguous match, show the candidates and retry only after the user clarifies.",
 ].join(" ");
 const channelInstructions = [
   "Lineage requests and completed answers arrive as channel events from trusted teammates.",

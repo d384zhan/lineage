@@ -157,6 +157,7 @@ describe("mcp server", () => {
 
     // Bob's daemon lives in the repo the MCP server will run in.
     const bob = await startDaemon({
+      auth: null,
       cwd: repo,
       io: new ScriptedIo(["a"]),
       stateDir: join(repo, ".git", "lineage"),
@@ -170,6 +171,7 @@ describe("mcp server", () => {
     const aliceState = mkdtempSync(join(tmpdir(), "lineage-alice-"));
     tempDirs.push(aliceState);
     const alice = await startDaemon({
+      auth: null,
       cwd: aliceState,
       io: new ScriptedIo(),
       stateDir: aliceState,
@@ -213,6 +215,7 @@ describe("mcp server", () => {
     const aliceRepo = await makeTempRepo();
     const bobRepo = await makeTempRepo();
     const alice = await startDaemon({
+      auth: null,
       cwd: aliceRepo,
       io: new ScriptedIo(),
       stateDir: join(aliceRepo, ".git", "lineage"),
@@ -222,6 +225,7 @@ describe("mcp server", () => {
     });
     daemons.push(alice);
     const bob = await startDaemon({
+      auth: null,
       cwd: bobRepo,
       io: new ScriptedIo(["m", "Because reservations prevent overselling."]),
       stateDir: join(bobRepo, ".git", "lineage"),
@@ -255,6 +259,7 @@ describe("mcp server", () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();
     const bob = await startDaemon({
+      auth: null,
       cwd: repo,
       io: new ScriptedIo(),
       approvalMode: "external",
@@ -268,6 +273,7 @@ describe("mcp server", () => {
 
     const aliceState = await makeTempRepo();
     const alice = await startDaemon({
+      auth: null,
       cwd: aliceState,
       io: new ScriptedIo(),
       stateDir: join(aliceState, ".git", "lineage"),

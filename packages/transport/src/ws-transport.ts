@@ -60,7 +60,8 @@ export class WebSocketLineageTransport implements LineageTransport {
   private readonly log: (line: string) => void;
 
   constructor(options: TransportOptions = {}) {
-    this.ackTimeoutMs = options.ackTimeoutMs ?? 10_000;
+    // Initial host approval may involve a human. Normal acks still arrive immediately.
+    this.ackTimeoutMs = options.ackTimeoutMs ?? 120_000;
     this.askTimeoutMs = options.askTimeoutMs ?? 120_000;
     this.initialBackoffMs = options.initialBackoffMs ?? 500;
     this.maxBackoffMs = options.maxBackoffMs ?? 8_000;

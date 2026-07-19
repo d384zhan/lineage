@@ -176,7 +176,10 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        recipient: { type: "string", description: "The teammate's user id, e.g. \"joe\"." },
+        recipient: {
+          type: "string",
+          description: "The teammate's full identity or a unique alias such as their email prefix or Git first name, e.g. \"joe\".",
+        },
         text: { type: "string", description: "The question." },
         line: { type: "string", description: "Exact path:line to explain. Required whenever the question can be anchored to code; enables Git blame and private originating-prompt matching." },
         evidence: evidenceJsonSchema,

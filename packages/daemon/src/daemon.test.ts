@@ -68,6 +68,7 @@ async function startTestDaemon(
   const handle = await startDaemon({
     cwd: options.cwd ?? stateDir,
     io,
+    auth: null,
     stateDir,
     repoId: "repo-1",
     network: { relayUrl: relay!.url, roomToken: TOKEN, userId, provider },

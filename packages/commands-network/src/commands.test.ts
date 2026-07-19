@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { MockLineageCore } from "@lineage/contracts/testing";
 import {
   readAuthSettings,
+  readMembershipSettings,
   readNetworkSettings,
   startDaemon,
   writeAuthSettings,
@@ -12,7 +13,7 @@ import {
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createHostMembershipAuthorizer, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, membersCommand, replyCommand } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -67,6 +68,7 @@ async function startRepoDaemon(
   const handle = await startDaemon({
     cwd: repo,
     io,
+    auth: null,
     stateDir: join(repo, ".git", "lineage"),
     repoId: "repo-1",
     network: {
@@ -222,7 +224,7 @@ describe("network commands", () => {
     const joinWithLogin = createJoinCommand(userStateDir);
 
     await joinWithLogin.run(
-      ["--relay", "ws://192.168.1.10:8787", "--token", TOKEN],
+      ["--relay", "ws://192.168.1.10:8787"],
       { cwd: repo, json: true },
     );
     const repeated = await joinWithLogin.run(
@@ -232,6 +234,40 @@ describe("network commands", () => {
 
     expect(repeated.userId).toBe("lorena@example.com");
     expect(repeated.relayUrl).toBe("ws://192.168.1.10:8787");
+  });
+
+  test("host approval persists verified members and auto-approves the host", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "lineage-members-"));
+    tempDirs.push(stateDir);
+    const prompts: string[] = [];
+    const authorize = await createHostMembershipAuthorizer({
+      repoId: "repo-1",
+      stateDir,
+      hostIdentity: "dawang@example.com",
+      prompt: async (question) => {
+        prompts.push(question);
+        return "yes";
+      },
+      print: () => {},
+    });
+
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "dawang@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
+    expect(await authorize({ repoId: "other-repo", actor: { userId: "mallory@example.com" } })).toBeFalse();
+    expect(prompts).toHaveLength(1);
+    expect((await readMembershipSettings(stateDir)).members.map((member) => member.identity)).toEqual([
+      "dawang@example.com",
+      "lorena@example.com",
+    ]);
+
+    const repo = await makeTempRepo();
+    await Bun.write(
+      join(repo, ".git", "lineage", "members.json"),
+      JSON.stringify(await readMembershipSettings(stateDir)),
+    );
+    await membersCommand.run(["revoke", "lorena@example.com"], { cwd: repo, json: true });
+    expect((await readMembershipSettings(join(repo, ".git", "lineage"))).members).toHaveLength(1);
   });
 
   test("adds Git identity aliases without requiring another join", async () => {

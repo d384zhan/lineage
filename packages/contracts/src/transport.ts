@@ -32,6 +32,8 @@ export const ErrorCodeSchema = z.enum([
   "unsupported_version",
   "unsupported_message_type",
   "recipient_offline",
+  "recipient_ambiguous",
+  "access_denied",
   "request_rejected",
   "request_timeout",
 ]);

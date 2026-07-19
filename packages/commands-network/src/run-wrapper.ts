@@ -66,7 +66,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
 
   const stateDir = resolveStateDir(options.cwd);
   const network = await readNetworkSettings(stateDir);
-  const userId = options.userId ?? network?.userId ?? process.env.USER ?? "unknown";
+  let userId = options.userId ?? network?.userId ?? process.env.USER ?? "unknown";
   const gitIdentities = detectGitIdentities(options.cwd, network?.gitIdentities ?? []);
 
   const sessionId = crypto.randomUUID();
@@ -91,7 +91,8 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
 
   let ownedDaemon: DaemonHandle | undefined;
   try {
-    await DaemonClient.open(options.cwd);
+    const daemon = await DaemonClient.open(options.cwd);
+    userId = (await daemon.status()).actor.userId;
   } catch {
     if (network) {
       ownedDaemon = await startDaemon({
@@ -106,6 +107,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
           },
         },
       });
+      userId = ownedDaemon.actor.userId;
       print("Lineage messaging is online in this session.");
     } else {
       print("Lineage messaging is offline. Run `lineage join` to connect this repo.");

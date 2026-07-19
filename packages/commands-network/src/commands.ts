@@ -14,6 +14,7 @@ import {
   pollForTokens,
   readAuthSettings,
   readHostSettings,
+  readMembershipSettings,
   readNetworkSettings,
   readRepoId,
   requestDeviceCode,
@@ -23,12 +24,14 @@ import {
   toAuthSettings,
   writeAuthSettings,
   writeHostSettings,
+  writeMembershipSettings,
   writeNetworkSettings,
   type ApprovalIo,
   type Fetcher,
   type OAuthConfig,
 } from "@lineage/daemon";
 import { startRelay } from "@lineage/relay";
+import type { MembershipAuthorizer } from "@lineage/relay";
 import { TransportError } from "@lineage/transport";
 import { CommandArguments, historyCommands } from "@lineage/commands-history";
 import { runAgent } from "./run-wrapper";
@@ -36,6 +39,7 @@ import { refreshPromptIndex, traceCodeLine } from "@lineage/prompt-index";
 import { ensureMcpRegistrations } from "./mcp-register";
 
 const NEVER = new Promise<never>(() => {});
+const HOST_APPROVAL_TOKEN = "host-approved-auth0-room";
 
 function localLanAddress(): string | undefined {
   for (const addresses of Object.values(networkInterfaces())) {
@@ -44,6 +48,50 @@ function localLanAddress(): string | undefined {
     }
   }
   return undefined;
+}
+
+export async function createHostMembershipAuthorizer(options: {
+  repoId: string;
+  stateDir: string;
+  hostIdentity?: string;
+  prompt: (question: string) => Promise<string>;
+  print?: (line: string) => void;
+}): Promise<MembershipAuthorizer> {
+  const print = options.print ?? ((line: string) => console.log(line));
+  const settings = await readMembershipSettings(options.stateDir);
+  const approved = new Set(settings.members.map((member) => member.identity.toLowerCase()));
+  if (options.hostIdentity && !approved.has(options.hostIdentity.toLowerCase())) {
+    settings.members.push({
+      identity: options.hostIdentity,
+      approvedAt: new Date().toISOString(),
+    });
+    approved.add(options.hostIdentity.toLowerCase());
+    await writeMembershipSettings(options.stateDir, settings);
+  }
+  const pending = new Map<string, Promise<boolean>>();
+  return async ({ repoId, actor }) => {
+    if (repoId !== options.repoId) return false;
+    const key = actor.userId.toLowerCase();
+    if (approved.has(key)) return true;
+    const existing = pending.get(key);
+    if (existing) return await existing;
+    const request = (async () => {
+      print("");
+      const gitName = actor.gitIdentities?.[0]?.name;
+      const detail = gitName ? ` (${gitName})` : "";
+      const answer = await options.prompt(
+        `${actor.userId}${detail} wants to join this repository. Approve? [y/N] `,
+      );
+      if (!["y", "yes"].includes(answer.trim().toLowerCase())) return false;
+      settings.members.push({ identity: actor.userId, approvedAt: new Date().toISOString() });
+      approved.add(key);
+      await writeMembershipSettings(options.stateDir, settings);
+      print(`Approved ${actor.userId}. Future sessions reconnect automatically.`);
+      return true;
+    })().finally(() => pending.delete(key));
+    pending.set(key, request);
+    return await request;
+  };
 }
 
 interface InitDependencies {
@@ -128,8 +176,10 @@ function friendlyAskError(error: unknown, recipient: string): Error {
     switch (error.code) {
       case "recipient_offline":
         return new Error(
-          `${recipient} is not connected right now. Their recorded history is still available: try \`lineage why <path>\`.`,
+          `${error.message}. Their recorded history is still available: try \`lineage why <path>\`.`,
         );
+      case "recipient_ambiguous":
+        return new Error(error.message);
       case "request_rejected":
         return new Error(`${recipient} declined the question: ${error.message}`);
       case "request_timeout":
@@ -169,6 +219,18 @@ export const hostCommand: LineageCommand = {
     if ((auth0Domain && !auth0Audience) || (!auth0Domain && auth0Audience)) {
       throw new Error("--auth0-domain and --auth0-audience must be set together");
     }
+    const repoId = await readRepoId(context.cwd);
+    const membershipReadline = auth0Domain
+      ? createInterface({ input: process.stdin, output: process.stdout })
+      : undefined;
+    const authorize = auth0Domain
+      ? await createHostMembershipAuthorizer({
+          repoId,
+          stateDir,
+          ...(login?.identity ? { hostIdentity: login.identity } : {}),
+          prompt: (question) => membershipReadline!.question(question),
+        })
+      : undefined;
     const relay = startRelay({
       port,
       token,
@@ -176,6 +238,7 @@ export const hostCommand: LineageCommand = {
       ...(auth0Domain && auth0Audience
         ? { auth: { issuer: auth0Domain, audience: auth0Audience } }
         : {}),
+      ...(authorize ? { authorize } : {}),
       log: (line) => console.log(`[relay] ${line}`),
     });
     await writeHostSettings(stateDir, { roomToken: token, port: relay.port });
@@ -187,15 +250,15 @@ export const hostCommand: LineageCommand = {
     console.log("Teammates on this network join with:");
     const advertisedHost = localLanAddress() ?? "<your-ip>";
     console.log(
-      `  lineage join --relay ws://${advertisedHost}:${relay.port} --token ${token}${
-        auth0Domain ? "" : " --user <name>"
-      }`,
+      auth0Domain
+        ? `  lineage join --relay ws://${advertisedHost}:${relay.port}`
+        : `  lineage join --relay ws://${advertisedHost}:${relay.port} --token ${token} --user <name>`,
     );
     console.log("  (paste once; Lineage remembers this room on that computer)");
     console.log("");
     console.log("For other networks, expose it with:");
     console.log(`  lineage tunnel --port ${relay.port}`);
-    console.log(`  (room token: ${token})`);
+    console.log(auth0Domain ? "  (verified teammates request host approval)" : `  (room token: ${token})`);
     return NEVER;
   },
 };
@@ -267,7 +330,10 @@ export function createJoinCommand(userStateDir = resolveUserStateDir()): Lineage
       );
       const settings = {
         relayUrl,
-        roomToken: args.get("token") ?? saved?.roomToken ?? args.require("token"),
+        roomToken:
+          args.get("token") ??
+          saved?.roomToken ??
+          (login ? HOST_APPROVAL_TOKEN : args.require("token")),
         userId: args.get("user") ?? login?.identity ?? saved?.userId ?? args.require("user"),
         ...(providerValue
           ? { provider: ProviderSchema.parse(providerValue) }
@@ -410,6 +476,35 @@ export function createLogoutCommand(userStateDir = resolveUserStateDir()): Linea
 }
 
 export const logoutCommand = createLogoutCommand();
+
+export const membersCommand: LineageCommand = {
+  name: "members",
+  description: "List or revoke host-approved repository members",
+  async run(rawArgs, context) {
+    const [action = "list", ...identityParts] = rawArgs;
+    const stateDir = resolveStateDir(context.cwd);
+    const settings = await readMembershipSettings(stateDir);
+    if (action === "revoke") {
+      const identity = identityParts.join(" ").trim();
+      if (!identity) throw new Error("Usage: lineage members revoke <identity>");
+      const remaining = settings.members.filter(
+        (member) => member.identity.toLowerCase() !== identity.toLowerCase(),
+      );
+      if (remaining.length === settings.members.length) {
+        throw new Error(`No approved member matches "${identity}"`);
+      }
+      settings.members = remaining;
+      await writeMembershipSettings(stateDir, settings);
+    } else if (action !== "list") {
+      throw new Error("Usage: lineage members [list|revoke <identity>]");
+    }
+    if (context.json) return settings;
+    if (!settings.members.length) return "No approved members.";
+    return settings.members
+      .map((member) => `${member.identity} (approved ${member.approvedAt})`)
+      .join("\n");
+  },
+};
 
 export const daemonCommand: LineageCommand = {
   name: "daemon",
@@ -609,6 +704,7 @@ export const networkCommands: readonly LineageCommand[] = [
   identityCommand,
   loginCommand,
   logoutCommand,
+  membersCommand,
   daemonCommand,
   runCommand,
   indexCommand,

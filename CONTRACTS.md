@@ -84,10 +84,17 @@ configuration ignores it and keeps room-token behavior. A relay started
 it against the issuer's JWKS (RS256, `iss`/`aud`/`exp`), derives the caller's
 identity as `email claim ?? sub`, and rejects the hello with `invalid_token`
 unless `sender.userId` equals that identity. Room-token equality is not
-optional in this mode: the relay requires both the room token and JWT. After a
-successful hello the
-relay also rejects any later envelope whose `sender.userId` differs from the
-authenticated one.
+optional for a generic authenticated relay: without a membership authorizer,
+the relay requires both the room token and JWT. `lineage host` supplies a
+repo-scoped membership authorizer instead. It prompts the host for first-time
+verified identities and persists approvals locally; in that mode host approval
+replaces the shared room token. After a successful hello the relay also rejects
+any later envelope whose `sender.userId` differs from the authenticated one.
+
+Question recipients are resolved against the online room roster. Exact userId
+matches win; otherwise a unique email prefix, Git identity name, or name token
+resolves to the canonical userId. Multiple matches return
+`recipient_ambiguous` with candidates instead of being reported offline.
 
 After a local `core.announce`, publish its returned `intent` as an
 `intent.announce` envelope. When a remote envelope arrives, pass its payload to

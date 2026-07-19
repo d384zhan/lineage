@@ -129,7 +129,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     options.answerer ??
     createSubAgentAnswerer({
       cwd: options.cwd,
-      userId: network.userId,
+      userId: actor.userId,
       provider: network.provider,
       print: io.print,
     });
