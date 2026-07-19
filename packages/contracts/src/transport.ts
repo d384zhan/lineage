@@ -8,7 +8,11 @@ import {
   UtcTimestampSchema,
 } from "./domain";
 
+export const MessageKindSchema = z.enum(["question", "context", "request"]);
+
 export const AgentQuestionSchema = z.object({
+  kind: MessageKindSchema.default("question"),
+  sourceSessionId: IdentifierSchema.optional(),
   text: z.string().trim().min(1),
   evidence: z.array(EvidenceRefSchema),
 });
@@ -132,6 +136,8 @@ export const ConnectionConfigSchema = z.object({
 
 export const AskInputSchema = z.object({
   recipient: IdentifierSchema,
+  kind: MessageKindSchema.default("question"),
+  sourceSessionId: IdentifierSchema.optional(),
   text: z.string().trim().min(1),
   evidence: z.array(EvidenceRefSchema).default([]),
 });
@@ -145,7 +151,8 @@ export const ReplyInputSchema = z.object({
 
 export const ApprovalActionSchema = z.enum(["agent", "manual", "reject"]);
 
-export type AgentQuestion = z.infer<typeof AgentQuestionSchema>;
+export type AgentQuestion = z.input<typeof AgentQuestionSchema>;
+export type MessageKind = z.infer<typeof MessageKindSchema>;
 export type AgentAnswer = z.infer<typeof AgentAnswerSchema>;
 export type Ack = z.infer<typeof AckSchema>;
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;

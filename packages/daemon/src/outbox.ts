@@ -2,7 +2,7 @@ import type { AgentAnswer, AgentQuestion } from "@lineage/contracts";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type OutboxStatus = "pending" | "answered" | "rejected" | "failed";
+export type OutboxStatus = "pending" | "delivered" | "answered" | "rejected" | "failed";
 
 export interface OutboxEntry {
   requestId: string;
@@ -65,6 +65,15 @@ export class Outbox {
     const entry = this.require(requestId);
     entry.status = "answered";
     entry.answer = answer;
+    delete entry.error;
+    this.persist();
+    return entry;
+  }
+
+  markDelivered(requestId: string): OutboxEntry {
+    const entry = this.require(requestId);
+    entry.status = "delivered";
+    delete entry.answer;
     delete entry.error;
     this.persist();
     return entry;

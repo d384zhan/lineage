@@ -6,7 +6,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonClient } from "@lineage/daemon";
-import { LINEAGE_CHANNEL_ENV, LINEAGE_PROVIDER_ENV } from "@lineage/contracts";
+import {
+  LINEAGE_CHANNEL_ENV,
+  LINEAGE_PROVIDER_ENV,
+  LINEAGE_SESSION_ID_ENV,
+} from "@lineage/contracts";
 import { createTools } from "./tools";
 
 const tools = createTools({ cwd: process.cwd(), env: process.env });
@@ -21,7 +25,8 @@ const groundingInstructions = [
 ].join(" ");
 const channelInstructions = [
   "Lineage requests and completed answers arrive as channel events from trusted teammates.",
-  "For a request, show the question and ask whether to dispatch this agent, answer manually, or reject.",
+  "For a question or action request, show it and ask whether to dispatch this agent, answer manually, or reject.",
+  "For context, show it and ask whether to accept it into this session or reject it; accepted context requires no reply.",
   "Call lineage_respond with their choice. After dispatch, answer using lineage_reply.",
   "For a completed outgoing request, call lineage_requests with its request ID and show the answer.",
 ].join(" ");
@@ -53,6 +58,7 @@ const notifiedInbound = new Set<string>();
 const notifiedOutgoing = new Set<string>();
 const outgoingStatuses = new Map<string, string>();
 const channelStartedAt = Date.now();
+const currentSessionId = process.env[LINEAGE_SESSION_ID_ENV];
 let daemon: DaemonClient | undefined;
 let polling = false;
 const poll = async () => {
@@ -68,13 +74,20 @@ const poll = async () => {
       if (!pending.has(requestId)) notifiedInbound.delete(requestId);
     }
     for (const entry of entries) {
-      if (entry.status !== "pending" || notifiedInbound.has(entry.requestId)) continue;
+      if (
+        entry.status !== "pending" ||
+        notifiedInbound.has(entry.requestId) ||
+        (currentSessionId && entry.question.sourceSessionId === currentSessionId)
+      ) continue;
+      const kind = entry.question.kind ?? "question";
       await server.notification({
         method: "notifications/claude/channel",
         params: {
           content: [
-            `Lineage question from ${entry.sender.userId}: ${entry.question.text}`,
-            `Ask: dispatch, manual, or reject? (${entry.requestId})`,
+            `Lineage ${kind} from ${entry.sender.userId}: ${entry.question.text}`,
+            kind === "context"
+              ? `Ask: accept into this session or reject? (${entry.requestId})`
+              : `Ask: dispatch, manual, or reject? (${entry.requestId})`,
           ].join("\n"),
           meta: {
             source: "lineage",
@@ -86,6 +99,10 @@ const poll = async () => {
       notifiedInbound.add(entry.requestId);
     }
     for (const entry of outgoing) {
+      if (
+        entry.question.sourceSessionId &&
+        entry.question.sourceSessionId !== currentSessionId
+      ) continue;
       const previous = outgoingStatuses.get(entry.requestId);
       outgoingStatuses.set(entry.requestId, entry.status);
       if (
@@ -93,6 +110,10 @@ const poll = async () => {
         notifiedOutgoing.has(entry.requestId) ||
         (previous !== "pending" && Date.parse(entry.createdAt) < channelStartedAt)
       ) continue;
+      if (entry.status === "delivered") {
+        notifiedOutgoing.add(entry.requestId);
+        continue;
+      }
       const content = entry.status === "answered"
         ? [
             `Lineage answer from ${entry.recipient} is ready: ${entry.question.text}`,

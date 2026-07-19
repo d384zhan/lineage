@@ -72,6 +72,7 @@ const RecordDecisionArgsSchema = z.object({
 
 const AskArgsSchema = z.object({
   recipient: z.string().min(1),
+  kind: z.enum(["question", "context", "request"]).default("question"),
   text: z.string().min(1).optional(),
   line: z.string().regex(/^.+:\d+$/).optional(),
   evidence: z.array(EvidenceInputSchema).default([]),
@@ -172,13 +173,18 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: MCP_TOOL_NAMES.ask,
     description:
-      "Queue a question for another developer's agent and return immediately. For why/how, implementation, regression, or design-decision questions, inspect the repository first and always pass the narrowest relevant path:line. Do not send a generic prose-only question when a code anchor exists. Omit line only for broad status or coordination questions.",
+      "Send a question, one-way context, or action request to another developer's agent and return immediately. Use kind=context for approved steering that needs no reply. For why/how, implementation, regression, or design-decision questions, inspect the repository first and always pass the narrowest relevant path:line. Do not send a generic prose-only question when a code anchor exists. Omit line only for broad status or coordination messages.",
     inputSchema: {
       type: "object",
       properties: {
         recipient: {
           type: "string",
           description: "The teammate's full identity or a unique alias such as their email prefix or Git first name, e.g. \"joe\".",
+        },
+        kind: {
+          type: "string",
+          enum: ["question", "context", "request"],
+          description: "question expects an answer; context is accepted into the teammate session without a reply; request asks for action and an eventual result.",
         },
         text: { type: "string", description: "The question." },
         line: { type: "string", description: "Exact path:line to explain. Required whenever the question can be anchored to code; enables Git blame and private originating-prompt matching." },
@@ -201,7 +207,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: MCP_TOOL_NAMES.respond,
     description:
-      "Choose how to handle a pending teammate question. Dispatch gives this active agent the approved historical context; manual sends the supplied text; reject declines it.",
+      "Choose how to handle a pending teammate message. Dispatch injects it and approved local context into this active agent; context messages need no reply. Manual answers questions or requests; reject declines any message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -366,6 +372,8 @@ export function createTools(options: ToolsOptions) {
         const daemon = await openDaemon();
         const queued = await daemon.askAsync({
           recipient: input.recipient,
+          kind: input.kind,
+          sourceSessionId: options.env[LINEAGE_SESSION_ID_ENV],
           text: input.text ?? `Why was ${input.line} implemented this way? Return the originating exact prompt if your local history can match it.`,
           evidence,
         });

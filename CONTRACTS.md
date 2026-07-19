@@ -124,12 +124,18 @@ The fixed MCP tool names are exported as `MCP_TOOL_NAMES`:
 - `lineage_record_decision`
 - `lineage_ask`
 - `lineage_requests`
+- `lineage_respond`
 - `lineage_reply`
 - `lineage_why`
 - `lineage_timeline`
 - `lineage_inbox`
 
 The recipient approval result is one of `agent`, `manual`, or `reject`.
+`lineage_ask` carries `question`, `request`, and one-way `context` messages so
+the MCP surface does not need a separate steering tool. Its optional
+`sourceSessionId` is runtime routing metadata: same-user recipients are allowed
+only for session-tagged asks, and the source MCP session suppresses its own
+inbound event.
 
 ## History behavior
 

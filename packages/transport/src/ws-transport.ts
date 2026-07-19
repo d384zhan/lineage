@@ -96,7 +96,12 @@ export class WebSocketLineageTransport implements LineageTransport {
       type: "question.ask",
       recipient: parsed.recipient,
       requestId,
-      payload: { text: parsed.text, evidence: parsed.evidence ?? [] },
+      payload: {
+        kind: parsed.kind,
+        sourceSessionId: parsed.sourceSessionId,
+        text: parsed.text,
+        evidence: parsed.evidence ?? [],
+      },
     });
     const routed = this.sendWithAck(envelope);
     routed.catch(() => {});

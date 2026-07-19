@@ -55,10 +55,27 @@ export class ApprovalQueue {
   }
 
   private async promptFor(entry: InboxEntry): Promise<void> {
+    const kind = entry.question.kind ?? "question";
     this.io.print("");
-    this.io.print(`Incoming question from ${entry.sender.userId}:`);
+    this.io.print(`Incoming ${kind} from ${entry.sender.userId}:`);
     this.io.print(renderInboundAgentRequest(toInboundRequest(entry)));
     for (;;) {
+      if (kind === "context") {
+        const choice = (
+          await this.io.prompt("[a]ccept into your agent session or [r]eject? ")
+        ).trim().toLowerCase();
+        if (choice === "a") {
+          await this.handle(entry, { action: "agent" });
+          return;
+        }
+        if (choice === "r") {
+          const reason = (await this.io.prompt("Reason (optional): ")).trim();
+          await this.handle(entry, { action: "reject", ...(reason ? { text: reason } : {}) });
+          return;
+        }
+        this.io.print("Please answer a or r.");
+        continue;
+      }
       const choice = (
         await this.io.prompt("[a]sk your agent, answer [m]anually, or [r]eject? ")
       )

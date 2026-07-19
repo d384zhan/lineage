@@ -571,10 +571,14 @@ export const indexCommand: LineageCommand = {
 
 export const askCommand: LineageCommand = {
   name: "ask",
-  description: "Ask a teammate's agent a question (they approve before answering)",
+  description: "Send a question, context, or request to a teammate's agent",
   async run(rawArgs, context) {
     const args = new CommandArguments(rawArgs);
     const recipient = args.get("to") ?? args.positional[0];
+    const kind = args.get("kind") ?? "question";
+    if (!["question", "context", "request"].includes(kind)) {
+      throw new Error("--kind must be question, context, or request");
+    }
     const lineSpec = args.get("line");
     const suppliedText = args.get("text") ?? args.positional.slice(1).join(" ");
     const text = suppliedText ||
@@ -591,11 +595,16 @@ export const askCommand: LineageCommand = {
       );
     }
     const client = await DaemonClient.open(context.cwd);
-    console.log(`Waiting for ${recipient} to approve and answer...`);
+    console.log(
+      kind === "context"
+        ? `Waiting for ${recipient} to accept the context...`
+        : `Waiting for ${recipient} to approve and answer...`,
+    );
     let answer;
     try {
       answer = await client.ask({
         recipient,
+        kind: kind as "question" | "context" | "request",
         text,
         evidence,
       });
@@ -603,6 +612,9 @@ export const askCommand: LineageCommand = {
       throw friendlyAskError(error, recipient);
     }
     if (context.json) return answer;
+    if (kind === "context") {
+      return `Context accepted by ${recipient}.`;
+    }
     const lines = [`${recipient} answered (${answer.mode}):`, "", answer.text];
     if (answer.quotedPrompt) {
       lines.push("", "originating exact prompt:", answer.quotedPrompt);

@@ -43,6 +43,18 @@ describe("Outbox", () => {
     expect(outbox.get("failed")?.status).toBe("failed");
   });
 
+  test("marks accepted one-way context as delivered without an answer", () => {
+    const outbox = new Outbox();
+    outbox.add("context-1", "bob", {
+      kind: "context",
+      text: "I am changing the cart schema.",
+      evidence: [],
+    });
+    outbox.markDelivered("context-1");
+    expect(outbox.get("context-1")?.status).toBe("delivered");
+    expect(outbox.get("context-1")?.answer).toBeUndefined();
+  });
+
   test("marks an interrupted pending request failed after restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "lineage-outbox-restart-"));
     temporary.push(directory);

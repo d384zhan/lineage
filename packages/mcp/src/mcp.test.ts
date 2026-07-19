@@ -227,11 +227,12 @@ describe("mcp server", () => {
     const bob = await startDaemon({
       auth: null,
       cwd: bobRepo,
-      io: new ScriptedIo(["m", "Because reservations prevent overselling."]),
+      io: new ScriptedIo(["m", "Because reservations prevent overselling.", "a"]),
       stateDir: join(bobRepo, ".git", "lineage"),
       repoId: "repo-1",
       network: { relayUrl: relay.url, roomToken: TOKEN, userId: "bob", provider: "claude" },
       openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+      answerer: async () => {},
     });
     daemons.push(bob);
 
@@ -253,6 +254,18 @@ describe("mcp server", () => {
     const result = JSON.parse(completed.text) as { status: string; answer: { text: string } };
     expect(result.status).toBe("answered");
     expect(result.answer.text).toBe("Because reservations prevent overselling.");
+
+    const contextQueued = await activeCodex.callTool(MCP_TOOL_NAMES.ask, {
+      recipient: "bob",
+      kind: "context",
+      text: "I am changing the cart schema for reservation expiry.",
+    });
+    const contextRequest = JSON.parse(contextQueued.text) as { requestId: string };
+    await until(() => alice.outbox.get(contextRequest.requestId)?.status === "delivered");
+    const delivered = await activeCodex.callTool(MCP_TOOL_NAMES.requests, {
+      requestId: contextRequest.requestId,
+    });
+    expect(JSON.parse(delivered.text).status).toBe("delivered");
   });
 
   test("interrupts active Claude sessions for new questions and completed answers", async () => {
@@ -324,5 +337,60 @@ describe("mcp server", () => {
     const completed = (await DaemonClient.forPort(alice.port, alice.secret).requests())
       .find((entry) => entry.requestId === requestId);
     expect(completed?.answer?.text).toBe("Cookies are readable during server rendering.");
+  });
+
+  test("routes context between two Claude sessions owned by the same user", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const repo = await makeTempRepo();
+    const daemon = await startDaemon({
+      auth: null,
+      cwd: repo,
+      io: new ScriptedIo(),
+      approvalMode: "external",
+      stateDir: join(repo, ".git", "lineage"),
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "claude" },
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+    });
+    daemons.push(daemon);
+
+    const sessionA = await makeClient(repo, {
+      [LINEAGE_USER_ID_ENV]: "alice",
+      [LINEAGE_PROVIDER_ENV]: "claude",
+      [LINEAGE_CHANNEL_ENV]: "1",
+      [LINEAGE_SESSION_ID_ENV]: "session-a",
+    });
+    const sessionB = await makeClient(repo, {
+      [LINEAGE_USER_ID_ENV]: "alice",
+      [LINEAGE_PROVIDER_ENV]: "claude",
+      [LINEAGE_CHANNEL_ENV]: "1",
+      [LINEAGE_SESSION_ID_ENV]: "session-b",
+    });
+
+    const queued = await sessionA.callTool(MCP_TOOL_NAMES.ask, {
+      recipient: "alice",
+      kind: "context",
+      text: "The cart work will add reservation expiry next.",
+    });
+    const requestId = (JSON.parse(queued.text) as { requestId: string }).requestId;
+    await until(() =>
+      sessionB.notifications.some(
+        (notification) =>
+          notification.method === "notifications/claude/channel" &&
+          JSON.stringify(notification.params).includes(requestId),
+      ),
+    );
+    expect(
+      sessionA.notifications.some((notification) =>
+        JSON.stringify(notification.params).includes(requestId)
+      ),
+    ).toBeFalse();
+
+    const accepted = await sessionB.callTool(MCP_TOOL_NAMES.respond, {
+      requestId,
+      action: "dispatch",
+    });
+    expect(accepted.text).toContain("No reply is required");
+    await until(() => daemon.outbox.get(requestId)?.status === "delivered");
   });
 });

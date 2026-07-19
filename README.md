@@ -148,6 +148,14 @@ or a unique Git-name token. For example, `dawang` resolves to
 `dawang.zhang24@gmail.com` when Dawang is the only online match. Ambiguous
 aliases return the matching identities and require clarification.
 
+The same `lineage_ask` tool also carries one-way session context with
+`kind: "context"`. The recipient accepts or rejects it; acceptance injects the
+context into that agent session without requiring a reply. Two Claude terminals
+on one computer work with the same login and daemon: `lineage run claude` gives
+each terminal a session ID and routes the event to the other session, not back
+to the sender. Keep the first Lineage-run session open because it owns the
+shared daemon for that repository.
+
 ### Demo beats
 
 1. Alice asks from Codex: `Ask Bob through Lineage why src/auth.ts:42 was implemented this way.`
