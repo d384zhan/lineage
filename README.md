@@ -128,6 +128,9 @@ lineage members list
 lineage members revoke lorena@example.com
 ```
 
+Revocation takes effect on that identity's next connection. It does not
+terminate an already-connected session.
+
 The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
 and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity.
 The daemon uses it as your userId, so teammates `lineage ask <that-identity>`.

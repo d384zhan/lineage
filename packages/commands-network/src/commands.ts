@@ -59,23 +59,32 @@ export async function createHostMembershipAuthorizer(options: {
 }): Promise<MembershipAuthorizer> {
   const print = options.print ?? ((line: string) => console.log(line));
   const settings = await readMembershipSettings(options.stateDir);
-  const approved = new Set(settings.members.map((member) => member.identity.toLowerCase()));
-  if (options.hostIdentity && !approved.has(options.hostIdentity.toLowerCase())) {
+  if (
+    options.hostIdentity &&
+    !settings.members.some(
+      (member) => member.identity.toLowerCase() === options.hostIdentity!.toLowerCase(),
+    )
+  ) {
     settings.members.push({
       identity: options.hostIdentity,
       approvedAt: new Date().toISOString(),
     });
-    approved.add(options.hostIdentity.toLowerCase());
     await writeMembershipSettings(options.stateDir, settings);
   }
   const pending = new Map<string, Promise<boolean>>();
+  let approvalQueue = Promise.resolve();
   return async ({ repoId, actor }) => {
     if (repoId !== options.repoId) return false;
     const key = actor.userId.toLowerCase();
-    if (approved.has(key)) return true;
+    const current = await readMembershipSettings(options.stateDir);
+    if (current.members.some((member) => member.identity.toLowerCase() === key)) return true;
     const existing = pending.get(key);
     if (existing) return await existing;
-    const request = (async () => {
+    const request = approvalQueue.then(async () => {
+      // Recheck after earlier approval prompts finish. This also makes a
+      // `lineage members revoke` effective without restarting the host.
+      const latest = await readMembershipSettings(options.stateDir);
+      if (latest.members.some((member) => member.identity.toLowerCase() === key)) return true;
       print("");
       const gitName = actor.gitIdentities?.[0]?.name;
       const detail = gitName ? ` (${gitName})` : "";
@@ -83,12 +92,13 @@ export async function createHostMembershipAuthorizer(options: {
         `${actor.userId}${detail} wants to join this repository. Approve? [y/N] `,
       );
       if (!["y", "yes"].includes(answer.trim().toLowerCase())) return false;
-      settings.members.push({ identity: actor.userId, approvedAt: new Date().toISOString() });
-      approved.add(key);
-      await writeMembershipSettings(options.stateDir, settings);
+      latest.members.push({ identity: actor.userId, approvedAt: new Date().toISOString() });
+      await writeMembershipSettings(options.stateDir, latest);
       print(`Approved ${actor.userId}. Future sessions reconnect automatically.`);
       return true;
-    })().finally(() => pending.delete(key));
+    });
+    approvalQueue = request.then(() => {}, () => {});
+    void request.finally(() => pending.delete(key)).catch(() => {});
     pending.set(key, request);
     return await request;
   };

@@ -237,16 +237,17 @@ describe("network commands", () => {
   });
 
   test("host approval persists verified members and auto-approves the host", async () => {
-    const stateDir = mkdtempSync(join(tmpdir(), "lineage-members-"));
-    tempDirs.push(stateDir);
+    const repo = await makeTempRepo();
+    const stateDir = join(repo, ".git", "lineage");
     const prompts: string[] = [];
+    const answers = ["yes", "no"];
     const authorize = await createHostMembershipAuthorizer({
       repoId: "repo-1",
       stateDir,
       hostIdentity: "dawang@example.com",
       prompt: async (question) => {
         prompts.push(question);
-        return "yes";
+        return answers.shift() ?? "no";
       },
       print: () => {},
     });
@@ -261,13 +262,10 @@ describe("network commands", () => {
       "lorena@example.com",
     ]);
 
-    const repo = await makeTempRepo();
-    await Bun.write(
-      join(repo, ".git", "lineage", "members.json"),
-      JSON.stringify(await readMembershipSettings(stateDir)),
-    );
     await membersCommand.run(["revoke", "lorena@example.com"], { cwd: repo, json: true });
-    expect((await readMembershipSettings(join(repo, ".git", "lineage"))).members).toHaveLength(1);
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeFalse();
+    expect(prompts).toHaveLength(2);
+    expect((await readMembershipSettings(stateDir)).members).toHaveLength(1);
   });
 
   test("adds Git identity aliases without requiring another join", async () => {
