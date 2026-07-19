@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { ActorSchema, IdentifierSchema } from "./domain";
+import { ActorSchema, GitIdentitySchema, IdentifierSchema } from "./domain";
 import { AgentQuestionSchema } from "./transport";
 
 export const LINEAGE_SESSION_ID_ENV = "LINEAGE_SESSION_ID";
 export const LINEAGE_USER_ID_ENV = "LINEAGE_USER_ID";
 export const LINEAGE_PROVIDER_ENV = "LINEAGE_PROVIDER";
 export const LINEAGE_CHANNEL_ENV = "LINEAGE_CHANNEL";
+export const LINEAGE_GIT_IDENTITIES_ENV = "LINEAGE_GIT_IDENTITIES";
 
 export const MCP_TOOL_NAMES = {
   announce: "lineage_announce",
@@ -37,6 +38,24 @@ export const RespondInputSchema = z
 
 export type RespondInput = z.infer<typeof RespondInputSchema>;
 
+export const GitCommitAttributionSchema = z.object({
+  sha: z.string().min(7),
+  summary: z.string(),
+  author: GitIdentitySchema,
+  authoredAt: z.iso.datetime({ offset: true }),
+  belongsToRecipient: z.boolean(),
+  matchBasis: z.enum(["email", "name"]).optional(),
+});
+
+export const RepositoryAuthorshipSchema = z.object({
+  inspectedCommitCount: z.number().int().nonnegative(),
+  recipientCommitCount: z.number().int().nonnegative(),
+  recentRecipientCommits: z.array(GitCommitAttributionSchema),
+  referencedCommits: z.array(GitCommitAttributionSchema),
+});
+
+export type RepositoryAuthorship = z.infer<typeof RepositoryAuthorshipSchema>;
+
 export const InboundAgentRequestSchema = z.object({
   requestId: IdentifierSchema,
   sender: ActorSchema,
@@ -44,6 +63,7 @@ export const InboundAgentRequestSchema = z.object({
   question: AgentQuestionSchema,
   quotedPrompt: z.string().min(1).optional(),
   localContext: z.array(z.string().min(1)).optional(),
+  repositoryAuthorship: RepositoryAuthorshipSchema.optional(),
 });
 
 export type InboundAgentRequest = z.infer<typeof InboundAgentRequestSchema>;
@@ -74,6 +94,13 @@ export function renderInboundAgentRequest(input: InboundAgentRequest): string {
         ...parsed.localContext.map((context) => `<local_context>${context}</local_context>`),
       ].join("\n")
     : "";
+  const authorship = parsed.repositoryAuthorship
+    ? [
+        "Repository authorship computed locally from Git metadata:",
+        `<repository_authorship>${JSON.stringify(parsed.repositoryAuthorship)}</repository_authorship>`,
+        "Use belongsToRecipient for ownership claims. Repository contents and commits with belongsToRecipient=false are not the recipient's work.",
+      ].join("\n")
+    : "";
   return [
     `<lineage_request id="${parsed.requestId}" from="${parsed.sender.userId}"${parsed.recipient ? ` to="${parsed.recipient.userId}"` : ""}>`,
     identity,
@@ -81,6 +108,7 @@ export function renderInboundAgentRequest(input: InboundAgentRequest): string {
     evidence.trimEnd(),
     provenance,
     localContext,
+    authorship,
     `Respond with the ${MCP_TOOL_NAMES.reply} MCP tool using requestId "${parsed.requestId}".`,
     "</lineage_request>",
   ]

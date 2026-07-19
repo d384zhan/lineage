@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   LINEAGE_PROVIDER_ENV,
   LINEAGE_CHANNEL_ENV,
+  LINEAGE_GIT_IDENTITIES_ENV,
   LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   MCP_TOOL_NAMES,
@@ -101,6 +102,9 @@ describe("mcp server", () => {
       [LINEAGE_USER_ID_ENV]: "alice",
       [LINEAGE_PROVIDER_ENV]: "claude",
       [LINEAGE_SESSION_ID_ENV]: "session-1",
+      [LINEAGE_GIT_IDENTITIES_ENV]: JSON.stringify([
+        { name: "Alice", email: "alice@example.com" },
+      ]),
     });
 
     const why = await client.callTool(MCP_TOOL_NAMES.why, { path: "src/auth.ts" });
@@ -116,6 +120,9 @@ describe("mcp server", () => {
     expect(announce.text).toContain("daemon is not running");
     const body = JSON.parse(announce.text.split("\n\n")[0]!);
     expect(body.intent.summary).toBe("Implement token refresh");
+    expect(body.intent.author.gitIdentities).toEqual([
+      { name: "Alice", email: "alice@example.com" },
+    ]);
     expect(body.conflicts).toEqual([]);
 
     const decision = await client.callTool(MCP_TOOL_NAMES.recordDecision, {

@@ -1,4 +1,4 @@
-import type { Actor, AgentAnswer, AgentQuestion } from "@lineage/contracts";
+import type { Actor, AgentAnswer, AgentQuestion, RepositoryAuthorship } from "@lineage/contracts";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -15,10 +15,18 @@ export interface InboxEntry {
   quotedPrompt?: string;
   /** Held only in daemon memory after local context hooks run. */
   localContext?: string[];
+  /** Computed from local Git metadata after dispatch approval; never persisted. */
+  repositoryAuthorship?: RepositoryAuthorship;
 }
 
 function withoutPrivateContext(entry: InboxEntry): InboxEntry {
-  const { quotedPrompt: _quotedPrompt, localContext: _localContext, answer, ...safe } = entry;
+  const {
+    quotedPrompt: _quotedPrompt,
+    localContext: _localContext,
+    repositoryAuthorship: _repositoryAuthorship,
+    answer,
+    ...safe
+  } = entry;
   if (!answer) return safe;
   const { quotedPrompt: _answerPrompt, ...safeAnswer } = answer;
   return { ...safe, answer: safeAnswer };
@@ -91,6 +99,15 @@ export class Inbox {
   attachLocalContext(requestId: string, localContext: string[]): InboxEntry {
     const entry = this.require(requestId);
     entry.localContext = localContext;
+    return entry;
+  }
+
+  attachRepositoryAuthorship(
+    requestId: string,
+    repositoryAuthorship: RepositoryAuthorship,
+  ): InboxEntry {
+    const entry = this.require(requestId);
+    entry.repositoryAuthorship = repositoryAuthorship;
     return entry;
   }
 

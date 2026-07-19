@@ -8,7 +8,7 @@ import {
   type WireEnvelope,
 } from "@lineage/contracts";
 import { join } from "node:path";
-import { openGitLineageRuntime } from "@lineage/git-store";
+import { detectGitIdentities, openGitLineageRuntime } from "@lineage/git-store";
 import {
   lineSpecFromEvidence,
   matchPromptsForLine,
@@ -38,6 +38,7 @@ import {
 import { Inbox, type InboxEntry } from "./inbox";
 import { Outbox } from "./outbox";
 import { runUserPromptContextHooks } from "./prompt-hooks";
+import { resolveRepositoryAuthorship } from "./authorship";
 
 export interface DaemonOptions {
   cwd: string;
@@ -54,6 +55,7 @@ export interface DaemonOptions {
   /** Terminal keeps the legacy a/m/r prompt; external lets the active agent handle it. */
   approvalMode?: "terminal" | "external";
   contextResolver?: (prompt: string) => Promise<string[]>;
+  authorshipResolver?: typeof resolveRepositoryAuthorship;
 }
 
 export type PromptResolver = (question: AgentQuestion) => Promise<string | undefined>;
@@ -77,9 +79,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   if (!network) {
     throw new Error("No relay connection configured. Run `lineage join` first.");
   }
+  const gitIdentities = network.gitIdentities?.length
+    ? network.gitIdentities
+    : detectGitIdentities(options.cwd);
   const actor: Actor = {
     userId: network.userId,
     ...(network.provider ? { provider: network.provider } : {}),
+    ...(gitIdentities.length ? { gitIdentities } : {}),
   };
   const transport =
     options.transport ?? new WebSocketLineageTransport({ log: (line) => io.print(line) });
@@ -108,8 +114,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   });
   const resolveContext = options.contextResolver ?? ((prompt: string) =>
     runUserPromptContextHooks({ provider: network.provider, cwd: options.cwd, prompt }));
+  const resolveAuthorship = options.authorshipResolver ?? resolveRepositoryAuthorship;
 
   async function approveForAgent(entry: InboxEntry, addLocalContext = false) {
+    try {
+      const authorship = await resolveAuthorship(options.cwd, actor, entry.question);
+      if (authorship) inbox.attachRepositoryAuthorship(entry.requestId, authorship);
+    } catch (error) {
+      io.print(`authorship lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     if (addLocalContext) {
       try {
         const context = await resolveContext(entry.question.text);

@@ -89,6 +89,17 @@ For computers on different networks, laptop A can run
 
 - Room secrets, relay URLs, and daemon state live under `.git/lineage/` and are
   never committed. Git notes carry only approved structured decisions.
+- `lineage join` captures the repository's effective Git name/email and carries
+  it with the Lineage actor. Add aliases with repeated
+  `--git-identity "Name <email>"` flags. Existing joins are upgraded at daemon
+  startup from `git config`, so rejoining is not required.
+  Use `lineage identity add "Name <email>"` for historical aliases and
+  `lineage identity list` to inspect the mapping.
+- Approved dispatches compute a memory-only authorship summary from up to 500
+  commits across local refs, including whether referenced commits belong to the
+  recipient. Agents are told to use that evidence instead of treating all code
+  in a shared repository as the recipient's work. Authorship context is not
+  stored in the inbox, Git notes, or the relay.
 - Repository identity is a stable hash of the normalized Git `origin`, so SSH
   and HTTPS clones meet in the same room without a committed Lineage file. A
   repository without an origin falls back to its first commit; an empty local

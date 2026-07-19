@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import {
   IdentifierSchema,
+  GitIdentitySchema,
   LINEAGE_GIT_DIRECTORY,
   LINEAGE_LEGACY_REPOSITORY_CONFIG,
   LINEAGE_REPOSITORY_CONFIG,
@@ -20,6 +21,7 @@ export const NetworkSettingsSchema = z.object({
   roomToken: z.string().min(1),
   userId: IdentifierSchema,
   provider: ProviderSchema.optional(),
+  gitIdentities: z.array(GitIdentitySchema).max(20).optional(),
 });
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>;

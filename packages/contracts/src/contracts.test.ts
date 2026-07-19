@@ -55,6 +55,18 @@ describe("shared contract fixtures", () => {
         evidence: [{ kind: "file", value: "src/auth.ts" }],
       },
       localContext: ["The service must support server rendering."],
+      repositoryAuthorship: {
+        inspectedCommitCount: 1,
+        recipientCommitCount: 0,
+        recentRecipientCommits: [],
+        referencedCommits: [{
+          sha: "abcdef1234567890",
+          summary: "Implement auth",
+          author: { name: "Bob", email: "bob@example.com" },
+          authoredAt: "2026-01-01T00:00:00Z",
+          belongsToRecipient: false,
+        }],
+      },
     });
     expect(prompt).toContain('<lineage_request id="request-1" from="bob" to="alice">');
     expect(prompt).toContain('You are answering as Lineage user "alice"');
@@ -62,6 +74,7 @@ describe("shared contract fixtures", () => {
     expect(prompt).toContain("lineage_reply");
     expect(prompt).toContain("file: src/auth.ts");
     expect(prompt).toContain("<local_context>The service must support server rendering.</local_context>");
+    expect(prompt).toContain('"belongsToRecipient":false');
   });
 
   test("allows exact prompts only in transient answers", () => {

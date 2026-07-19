@@ -1,5 +1,6 @@
 import {
   LINEAGE_PROVIDER_ENV,
+  LINEAGE_GIT_IDENTITIES_ENV,
   LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   MCP_TOOL_NAMES,
@@ -10,7 +11,7 @@ import {
   type LineageCore,
 } from "@lineage/contracts";
 import { DaemonClient } from "@lineage/daemon";
-import { openGitLineageRuntime } from "@lineage/git-store";
+import { openGitLineageRuntime, parseGitIdentities } from "@lineage/git-store";
 import { loadPromptIndex, matchPromptsForLine, readExactPrompt, traceCodeLine } from "@lineage/prompt-index";
 import { z } from "zod";
 
@@ -288,10 +289,12 @@ export function createTools(options: ToolsOptions) {
   function actor(): Actor {
     const provider = ProviderSchema.safeParse(options.env[LINEAGE_PROVIDER_ENV]);
     const sessionId = options.env[LINEAGE_SESSION_ID_ENV];
+    const gitIdentities = parseGitIdentities(options.env[LINEAGE_GIT_IDENTITIES_ENV]);
     return {
       userId: options.env[LINEAGE_USER_ID_ENV] ?? "unknown",
       ...(provider.success ? { provider: provider.data } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(gitIdentities.length ? { gitIdentities } : {}),
     };
   }
 

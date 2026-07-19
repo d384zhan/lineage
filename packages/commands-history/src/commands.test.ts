@@ -87,13 +87,20 @@ describe("history commands", () => {
     const decision = await linkCommitCommand.run(
       ["--commit", "HEAD", "--session", "session-1", "--user", "alice"],
       { cwd, json: true },
-    ) as { assumptions: unknown[]; symbols: string[] };
+    ) as {
+      assumptions: unknown[];
+      symbols: string[];
+      author: { gitIdentities?: Array<{ name: string; email: string }> };
+    };
     const why = await whyCommand.run(["auth.ts"], { cwd, json: true }) as {
       matches: Array<{ matchedBy: string[] }>;
     };
 
     expect(decision.assumptions).toHaveLength(1);
     expect(decision.symbols).toEqual(["storage"]);
+    expect(decision.author.gitIdentities).toEqual([
+      { name: "Lineage Test", email: "lineage@example.com" },
+    ]);
     expect(why.matches).toHaveLength(1);
     expect(why.matches[0]?.matchedBy).toContain("path");
   });

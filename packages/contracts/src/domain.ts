@@ -6,10 +6,18 @@ export const IdentifierSchema = z.string().min(1);
 export const UtcTimestampSchema = z.iso.datetime({ offset: true });
 export const ProviderSchema = z.enum(["claude", "codex"]);
 
+export const GitIdentitySchema = z.object({
+  name: z.string().trim().min(1),
+  // Git accepts identifiers that are not RFC email addresses (for example,
+  // local-only addresses), so preserve its configured value verbatim.
+  email: z.string().trim().min(1),
+});
+
 export const ActorSchema = z.object({
   userId: IdentifierSchema,
   provider: ProviderSchema.optional(),
   sessionId: IdentifierSchema.optional(),
+  gitIdentities: z.array(GitIdentitySchema).max(20).optional(),
 });
 
 export const AssumptionSchema = z.object({
@@ -134,6 +142,7 @@ export const TimelineResultSchema = z.object({
 
 export type Provider = z.infer<typeof ProviderSchema>;
 export type Actor = z.infer<typeof ActorSchema>;
+export type GitIdentity = z.infer<typeof GitIdentitySchema>;
 export type Assumption = z.infer<typeof AssumptionSchema>;
 export type IntentStatus = z.infer<typeof IntentStatusSchema>;
 export type IntentRecord = z.infer<typeof IntentRecordSchema>;

@@ -246,6 +246,12 @@ describe("daemon", () => {
       },
       answerer: async ({ request }) => {
         expect(request.quotedPrompt).toBe(exactPrompt);
+        expect(request.repositoryAuthorship?.recipientCommitCount).toBe(1);
+        expect(request.repositoryAuthorship?.recentRecipientCommits[0]).toMatchObject({
+          summary: "Add server-side authentication",
+          belongsToRecipient: true,
+          matchBasis: "email",
+        });
         await bobClient!.reply({ requestId: request.requestId, text: "Cookies support server rendering." });
       },
     });

@@ -21,6 +21,9 @@ export function toInboundRequest(entry: InboxEntry, recipient?: Actor): InboundA
     question: entry.question,
     ...(entry.quotedPrompt ? { quotedPrompt: entry.quotedPrompt } : {}),
     ...(entry.localContext?.length ? { localContext: entry.localContext } : {}),
+    ...(entry.repositoryAuthorship
+      ? { repositoryAuthorship: entry.repositoryAuthorship }
+      : {}),
   };
 }
 

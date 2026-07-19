@@ -7,6 +7,9 @@ import {
 } from "@lineage/contracts";
 import {
   DaemonClient,
+  detectGitIdentities,
+  parseGitIdentity,
+  readNetworkSettings,
   readRepoId,
   resolveStateDir,
   startDaemon,
@@ -196,21 +199,61 @@ export const joinCommand: LineageCommand = {
       throw new Error("--relay must be a ws://, wss://, http://, or https:// URL");
     }
     const providerValue = args.get("provider");
+    const gitIdentities = detectGitIdentities(
+      context.cwd,
+      args.all("git-identity").map(parseGitIdentity),
+    );
     const settings = {
       relayUrl,
       roomToken: args.require("token"),
       userId: args.require("user"),
       ...(providerValue ? { provider: ProviderSchema.parse(providerValue) } : {}),
+      ...(gitIdentities.length ? { gitIdentities } : {}),
     };
     const repoId = await readRepoId(context.cwd);
     await writeNetworkSettings(resolveStateDir(context.cwd), settings);
     if (!context.json) {
       return [
         `Joined room ${repoId} as ${settings.userId} via ${relayUrl}.`,
+        ...(gitIdentities.length
+          ? [`Git identity: ${gitIdentities.map((identity) => `${identity.name} <${identity.email}>`).join(", ")}.`]
+          : ["Git identity: none detected; configure Git or pass --git-identity \"Name <email>\"."]),
         `Next: run \`lineage run ${settings.provider ?? "claude"}\` to start your agent with messaging.`,
       ].join("\n");
     }
     return { repoId, ...settings, roomToken: "<saved>" };
+  },
+};
+
+export const identityCommand: LineageCommand = {
+  name: "identity",
+  description: "List or add Git identities mapped to your Lineage user",
+  async run(rawArgs, context) {
+    const [action = "list", ...values] = rawArgs;
+    const stateDir = resolveStateDir(context.cwd);
+    const settings = await readNetworkSettings(stateDir);
+    if (!settings) throw new Error("Run `lineage join` before managing identities.");
+    if (action === "add") {
+      if (!values.length) {
+        throw new Error('Usage: lineage identity add "Name <email@example.com>"');
+      }
+      const aliases = values.map(parseGitIdentity);
+      settings.gitIdentities = detectGitIdentities(context.cwd, [
+        ...(settings.gitIdentities ?? []),
+        ...aliases,
+      ]);
+      await writeNetworkSettings(stateDir, settings);
+    } else if (action === "refresh") {
+      settings.gitIdentities = detectGitIdentities(context.cwd, settings.gitIdentities ?? []);
+      await writeNetworkSettings(stateDir, settings);
+    } else if (action !== "list") {
+      throw new Error("Usage: lineage identity [list|refresh|add \"Name <email>\"]");
+    }
+    const identities = settings.gitIdentities ?? [];
+    if (context.json) return { userId: settings.userId, gitIdentities: identities };
+    return identities.length
+      ? identities.map((identity) => `${identity.name} <${identity.email}>`).join("\n")
+      : "No Git identities configured.";
   },
 };
 
@@ -409,6 +452,7 @@ export const networkCommands: readonly LineageCommand[] = [
   hostCommand,
   tunnelCommand,
   joinCommand,
+  identityCommand,
   daemonCommand,
   runCommand,
   indexCommand,

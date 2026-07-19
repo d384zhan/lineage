@@ -12,6 +12,8 @@ export { createSubAgentAnswerer, resolveExecutable } from "./agent-answerer";
 export type { AgentAnswerer, AgentAnswererContext, SubAgentOptions } from "./agent-answerer";
 export { runUserPromptContextHooks } from "./prompt-hooks";
 export type { PromptHookOptions } from "./prompt-hooks";
+export { detectGitIdentities, parseGitIdentity } from "@lineage/git-store";
+export { resolveRepositoryAuthorship } from "./authorship";
 export { DAEMON_SECRET_HEADER } from "./http";
 export type { CoreRuntime, RuntimeOpener } from "./http";
 export {

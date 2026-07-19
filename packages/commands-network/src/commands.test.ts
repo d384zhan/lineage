@@ -10,7 +10,7 @@ import {
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createInitCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createInitCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -187,6 +187,8 @@ describe("network commands", () => {
 
   test("join validates and stores connection settings", async () => {
     const repo = await makeTempRepo();
+    expect(Bun.spawnSync(["git", "config", "user.name", "Alice"], { cwd: repo }).exitCode).toBe(0);
+    expect(Bun.spawnSync(["git", "config", "user.email", "alice@example.com"], { cwd: repo }).exitCode).toBe(0);
     const output = await joinCommand.run(
       ["--relay", "https://demo.trycloudflare.com", "--token", TOKEN, "--user", "alice", "--provider", "claude"],
       { cwd: repo, json: false },
@@ -198,7 +200,26 @@ describe("network commands", () => {
       roomToken: TOKEN,
       userId: "alice",
       provider: "claude",
+      gitIdentities: [{ name: "Alice", email: "alice@example.com" }],
     });
+  });
+
+  test("adds Git identity aliases without requiring another join", async () => {
+    const repo = await makeTempRepo();
+    expect(Bun.spawnSync(["git", "config", "user.name", "Alice"], { cwd: repo }).exitCode).toBe(0);
+    expect(Bun.spawnSync(["git", "config", "user.email", "alice@example.com"], { cwd: repo }).exitCode).toBe(0);
+    await joinCommand.run(
+      ["--relay", "ws://localhost:8787", "--token", TOKEN, "--user", "alice"],
+      { cwd: repo, json: true },
+    );
+    const result = await identityCommand.run(
+      ["add", "Alice Work <alice@work.example>"],
+      { cwd: repo, json: true },
+    ) as { gitIdentities: Array<{ name: string; email: string }> };
+    expect(result.gitIdentities).toEqual([
+      { name: "Alice", email: "alice@example.com" },
+      { name: "Alice Work", email: "alice@work.example" },
+    ]);
   });
 
   test("ask fails helpfully when the daemon is not running", async () => {
@@ -302,6 +323,8 @@ describe("run wrapper", () => {
   test("propagates lineage env to the agent and captures the transcript", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();
+    expect(Bun.spawnSync(["git", "config", "user.name", "Alice"], { cwd: repo }).exitCode).toBe(0);
+    expect(Bun.spawnSync(["git", "config", "user.email", "alice@example.com"], { cwd: repo }).exitCode).toBe(0);
     await startRepoDaemon(repo, "alice");
 
     const outFile = join(repo, "agent-env.json");
@@ -320,6 +343,7 @@ describe("run wrapper", () => {
         "  user: process.env.LINEAGE_USER_ID,",
         "  provider: process.env.LINEAGE_PROVIDER,",
         "  channel: process.env.LINEAGE_CHANNEL,",
+        "  gitIdentities: JSON.parse(process.env.LINEAGE_GIT_IDENTITIES || '[]'),",
         "}));",
       ].join("\n"),
     );
@@ -340,6 +364,9 @@ describe("run wrapper", () => {
     expect(agentEnv.user).toBe("alice");
     expect(agentEnv.provider).toBe("claude");
     expect(agentEnv.channel).toBe("1");
+    expect(agentEnv.gitIdentities).toEqual([
+      { name: "Alice", email: "alice@example.com" },
+    ]);
 
     const index = await loadPromptIndex(indexPath);
     expect(index.entries).toHaveLength(1);

@@ -4,6 +4,7 @@ export {
   announceCommand,
   daemonCommand,
   hostCommand,
+  identityCommand,
   inboxCommand,
   indexCommand,
   initCommand,

@@ -5,7 +5,7 @@ import type {
 } from "@lineage/contracts";
 import { ProviderSchema } from "@lineage/contracts";
 import { DefaultLineageCore } from "@lineage/core";
-import { GitLineageRepository } from "@lineage/git-store";
+import { GitLineageRepository, resolveGitIdentities } from "@lineage/git-store";
 import { loadPromptIndex, matchPromptsForLine, readExactPrompt } from "@lineage/prompt-index";
 import { CommandArguments, parseAssumptions } from "./args";
 
@@ -24,15 +24,17 @@ async function withCore<T>(cwd: string, action: (
   }
 }
 
-function actorFrom(args: CommandArguments): Actor {
+function actorFrom(args: CommandArguments, cwd: string): Actor {
   const providerValue = args.get("provider");
   const provider = providerValue
     ? ProviderSchema.parse(providerValue)
     : undefined;
+  const gitIdentities = resolveGitIdentities(cwd);
   return {
     userId: args.get("user") ?? process.env.USER ?? "unknown",
     ...(provider ? { provider } : {}),
     ...(args.get("session") ? { sessionId: args.get("session") } : {}),
+    ...(gitIdentities.length ? { gitIdentities } : {}),
   };
 }
 
@@ -67,7 +69,7 @@ export const announceCommand: LineageCommand = {
     return withCore(context.cwd, async (core, repository) =>
       core.announce({
         repoId: await repository.getRepoId(),
-        author: actorFrom(args),
+        author: actorFrom(args, context.cwd),
         summary: args.require("summary"),
         files: args.all("file"),
         symbols: args.all("symbol"),
@@ -104,7 +106,7 @@ export const linkCommitCommand: LineageCommand = {
     return withCore(context.cwd, (core) =>
       core.linkCommit({
         commitSha: args.get("commit") ?? "HEAD",
-        author: actorFrom(args),
+        author: actorFrom(args, context.cwd),
         ...(args.get("rationale") ? { rationale: args.get("rationale") } : {}),
         alternatives: args.all("alternative"),
         assumptions: parseAssumptions(args.all("assume")),

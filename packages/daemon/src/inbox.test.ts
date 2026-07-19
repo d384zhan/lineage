@@ -61,6 +61,12 @@ describe("Inbox", () => {
       inbox.add("request-1", SENDER, QUESTION);
       inbox.attachQuotedPrompt("request-1", "private originating prompt");
       inbox.attachLocalContext("request-1", ["private second-brain context"]);
+      inbox.attachRepositoryAuthorship("request-1", {
+        inspectedCommitCount: 1,
+        recipientCommitCount: 0,
+        recentRecipientCommits: [],
+        referencedCommits: [],
+      });
       inbox.approveForAgent("request-1");
 
       let restored = new Inbox(path);
@@ -69,6 +75,7 @@ describe("Inbox", () => {
       expect(restored.get("request-1")?.status).toBe("pending");
       expect(restored.get("request-1")?.quotedPrompt).toBeUndefined();
       expect(restored.get("request-1")?.localContext).toBeUndefined();
+      expect(restored.get("request-1")?.repositoryAuthorship).toBeUndefined();
 
       inbox.markAnswered("request-1", {
         requestId: "request-1",

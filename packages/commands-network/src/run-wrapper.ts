@@ -1,6 +1,7 @@
 import {
   LINEAGE_PROVIDER_ENV,
   LINEAGE_CHANNEL_ENV,
+  LINEAGE_GIT_IDENTITIES_ENV,
   LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   type Provider,
@@ -8,6 +9,7 @@ import {
 import { refreshPromptIndex } from "@lineage/prompt-index";
 import {
   DaemonClient,
+  detectGitIdentities,
   readRepoId,
   readNetworkSettings,
   resolveExecutable,
@@ -65,6 +67,9 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const stateDir = resolveStateDir(options.cwd);
   const network = await readNetworkSettings(stateDir);
   const userId = options.userId ?? network?.userId ?? process.env.USER ?? "unknown";
+  const gitIdentities = network?.gitIdentities?.length
+    ? network.gitIdentities
+    : detectGitIdentities(options.cwd);
 
   const sessionId = crypto.randomUUID();
   const extraArgs = options.extraArgs ?? [];
@@ -119,6 +124,9 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         [LINEAGE_SESSION_ID_ENV]: sessionId,
         [LINEAGE_USER_ID_ENV]: userId,
         [LINEAGE_PROVIDER_ENV]: options.provider,
+        ...(gitIdentities.length
+          ? { [LINEAGE_GIT_IDENTITIES_ENV]: JSON.stringify(gitIdentities) }
+          : {}),
         ...(options.channel ? { [LINEAGE_CHANNEL_ENV]: "1" } : {}),
       },
       options.cwd,
