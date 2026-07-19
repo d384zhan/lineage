@@ -68,13 +68,29 @@ describe("shared contract fixtures", () => {
         }],
       },
     });
-    expect(prompt).toContain('<lineage_request id="request-1" from="bob" to="alice">');
+    expect(prompt).toContain('<lineage_request id="request-1" kind="question" from="bob" to="alice">');
     expect(prompt).toContain('You are answering as Lineage user "alice"');
     expect(prompt).toContain("Do not claim repository work as alice's");
     expect(prompt).toContain("lineage_reply");
     expect(prompt).toContain("file: src/auth.ts");
     expect(prompt).toContain("<local_context>The service must support server rendering.</local_context>");
     expect(prompt).toContain('"belongsToRecipient":false');
+  });
+
+  test("renders approved context without requiring a reply", () => {
+    const prompt = renderInboundAgentRequest({
+      requestId: "context-1",
+      sender: { userId: "lorena" },
+      recipient: { userId: "dawang" },
+      question: {
+        kind: "context",
+        text: "I am changing the cart schema for reservation expiry.",
+        evidence: [],
+      },
+    });
+    expect(prompt).toContain('kind="context"');
+    expect(prompt).toContain("No reply is required");
+    expect(prompt).toContain("Do not call lineage_reply");
   });
 
   test("allows exact prompts only in transient answers", () => {

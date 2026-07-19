@@ -14,6 +14,13 @@ const RELAY_ACTOR: Actor = { userId: "relay" };
 
 export type RoomTokenResolver = string | ((repoId: string) => string | undefined);
 
+export interface MembershipRequest {
+  repoId: string;
+  actor: Actor;
+}
+
+export type MembershipAuthorizer = (request: MembershipRequest) => Promise<boolean>;
+
 export interface RelayOptions {
   port: number;
   /** Shared token for every room, or a per-room resolver. */
@@ -23,6 +30,8 @@ export interface RelayOptions {
    * userIds must match the token's identity.
    */
   auth?: RelayAuthOptions;
+  /** Optional host approval replaces the shared token for verified Auth0 users. */
+  authorize?: MembershipAuthorizer;
   hostname?: string;
   log?: (line: string) => void;
 }
@@ -107,12 +116,6 @@ export function startRelay(options: RelayOptions): RelayHandle {
       client.close(4001, "not authenticated");
       return;
     }
-    const expected = resolveToken(envelope.repoId);
-    if (!expected || envelope.payload.roomToken !== expected) {
-      sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
-      client.close(4001, "invalid room token");
-      return;
-    }
     if (verifier) {
       const token = envelope.payload.accessToken;
       if (!token) {
@@ -142,6 +145,36 @@ export function startRelay(options: RelayOptions): RelayHandle {
           `userId "${envelope.sender.userId}" does not match authenticated identity "${identity}"`,
         );
         client.close(4001, "identity mismatch");
+        return;
+      }
+      if (options.authorize) {
+        const allowed = await options.authorize({
+          repoId: envelope.repoId,
+          actor: envelope.sender,
+        });
+        if (!allowed) {
+          sendError(
+            client,
+            envelope.repoId,
+            "access_denied",
+            `The host did not approve ${identity} for this repository`,
+          );
+          client.close(4003, "membership denied");
+          return;
+        }
+      } else {
+        const expected = resolveToken(envelope.repoId);
+        if (!expected || envelope.payload.roomToken !== expected) {
+          sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
+          client.close(4001, "invalid room token");
+          return;
+        }
+      }
+    } else {
+      const expected = resolveToken(envelope.repoId);
+      if (!expected || envelope.payload.roomToken !== expected) {
+        sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
+        client.close(4001, "invalid room token");
         return;
       }
     }
@@ -195,18 +228,35 @@ export function startRelay(options: RelayOptions): RelayHandle {
       case "question.ask":
       case "question.answer":
       case "question.reject": {
-        const target = rooms.get(repoId, envelope.recipient);
-        if (!target) {
+        const resolution = rooms.resolve(repoId, envelope.recipient);
+        if (resolution.status === "ambiguous") {
           sendError(
             client,
             repoId,
-            "recipient_offline",
-            `${envelope.recipient} is offline`,
+            "recipient_ambiguous",
+            `"${envelope.recipient}" matches multiple online users: ${resolution.candidates
+              .map((candidate) => candidate.userId)
+              .join(", ")}. Use the full identity.`,
             envelope.requestId,
           );
           return;
         }
-        target.client.send(JSON.stringify(envelope));
+        if (resolution.status === "missing") {
+          const online = resolution.candidates.map((candidate) => candidate.userId).join(", ");
+          sendError(
+            client,
+            repoId,
+            "recipient_offline",
+            `No online user matches "${envelope.recipient}"${
+              online ? `. Online users: ${online}` : ""
+            }`,
+            envelope.requestId,
+          );
+          return;
+        }
+        resolution.member.client.send(
+          JSON.stringify({ ...envelope, recipient: resolution.member.userId }),
+        );
         sendAck(client, repoId, envelope.id);
         return;
       }

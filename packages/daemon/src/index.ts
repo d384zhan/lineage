@@ -19,6 +19,7 @@ export type { CoreRuntime, RuntimeOpener } from "./http";
 export {
   AuthSettingsSchema,
   HostSettingsSchema,
+  MembershipSettingsSchema,
   NetworkSettingsSchema,
   DaemonInfoSchema,
   deleteAuthSettings,
@@ -27,6 +28,7 @@ export {
   readAuthSettings,
   readDaemonInfo,
   readHostSettings,
+  readMembershipSettings,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
@@ -34,9 +36,16 @@ export {
   writeAuthSettings,
   writeDaemonInfo,
   writeHostSettings,
+  writeMembershipSettings,
   writeNetworkSettings,
 } from "./files";
-export type { AuthSettings, DaemonInfo, HostSettings, NetworkSettings } from "./files";
+export type {
+  AuthSettings,
+  DaemonInfo,
+  HostSettings,
+  MembershipSettings,
+  NetworkSettings,
+} from "./files";
 export {
   decodeJwtPayload,
   ensureFreshAuth,

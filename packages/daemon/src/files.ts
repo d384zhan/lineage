@@ -34,6 +34,17 @@ export const HostSettingsSchema = z.object({
 
 export type HostSettings = z.infer<typeof HostSettingsSchema>;
 
+export const ApprovedMemberSchema = z.object({
+  identity: z.string().min(1),
+  approvedAt: UtcTimestampSchema,
+});
+
+export const MembershipSettingsSchema = z.object({
+  members: z.array(ApprovedMemberSchema),
+});
+
+export type MembershipSettings = z.infer<typeof MembershipSettingsSchema>;
+
 /**
  * Auth0 login state written by `lineage login`. Lives under the user's global
  * Lineage directory because login identity belongs to a person, not a repo.
@@ -63,6 +74,7 @@ export type DaemonInfo = z.infer<typeof DaemonInfoSchema>;
 
 const NETWORK_FILE = "network.json";
 const HOST_FILE = "host.json";
+const MEMBERS_FILE = "members.json";
 const DAEMON_FILE = "daemon.json";
 export const INBOX_FILE = "inbox.json";
 export const OUTBOX_FILE = "outbox.json";
@@ -154,6 +166,26 @@ export async function writeHostSettings(
   await Bun.write(
     path,
     JSON.stringify(HostSettingsSchema.parse(settings), null, 2),
+  );
+  chmodSync(path, 0o600);
+}
+
+export async function readMembershipSettings(
+  stateDir: string,
+): Promise<MembershipSettings> {
+  const raw = await readJsonFile(join(stateDir, MEMBERS_FILE));
+  return raw === undefined ? { members: [] } : MembershipSettingsSchema.parse(raw);
+}
+
+export async function writeMembershipSettings(
+  stateDir: string,
+  settings: MembershipSettings,
+): Promise<void> {
+  mkdirSync(stateDir, { recursive: true });
+  const path = join(stateDir, MEMBERS_FILE);
+  await Bun.write(
+    path,
+    JSON.stringify(MembershipSettingsSchema.parse(settings), null, 2),
   );
   chmodSync(path, 0o600);
 }

@@ -1,4 +1,5 @@
 import {
+  AskInputSchema,
   renderInboundAgentRequest,
   type Actor,
   type AgentQuestion,
@@ -129,7 +130,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     options.answerer ??
     createSubAgentAnswerer({
       cwd: options.cwd,
-      userId: network.userId,
+      userId: actor.userId,
       provider: network.provider,
       print: io.print,
     });
@@ -178,9 +179,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     return toInboundRequest(entry, actor);
   }
 
+  async function acknowledgeContext(entry: InboxEntry): Promise<void> {
+    const accepted = {
+      requestId: entry.requestId,
+      mode: "manual" as const,
+      text: "Context accepted",
+      evidence: [],
+    };
+    await publishAnswer(transport, repoId, actor, entry.sender.userId, accepted);
+    inbox.markAnswered(entry.requestId, accepted);
+  }
+
   async function handleApproval(entry: InboxEntry, outcome: ApprovalOutcome): Promise<void> {
     if (outcome.action === "agent") {
       const request = await approveForAgent(entry);
+      if ((entry.question.kind ?? "question") === "context") {
+        await acknowledgeContext(entry);
+      }
       // The sub-agent may take a minute; answer flows back via /reply.
       // Do not block the approval queue on it.
       answerer({ request }).catch((error) => {
@@ -224,6 +239,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
     if (input.action === "dispatch") {
       const request = await approveForAgent(entry, true);
+      if ((entry.question.kind ?? "question") === "context") {
+        await acknowledgeContext(entry);
+      }
       return {
         action: "dispatch",
         request,
@@ -238,17 +256,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
 
   function askAsync(input: AskInput) {
+    const parsed = AskInputSchema.parse(input);
     const requestId = crypto.randomUUID();
-    const question: AgentQuestion = { text: input.text, evidence: input.evidence ?? [] };
-    outbox.add(requestId, input.recipient, question);
-    void transport.ask(input, requestId).then(
+    const question: AgentQuestion = {
+      kind: parsed.kind,
+      sourceSessionId: parsed.sourceSessionId,
+      text: parsed.text,
+      evidence: parsed.evidence,
+    };
+    outbox.add(requestId, parsed.recipient, question);
+    void transport.ask(parsed, requestId).then(
       (answer) => {
-        outbox.markAnswered(requestId, answer);
-        io.print(`answer ready from ${input.recipient}: ${requestId}`);
+        if (parsed.kind === "context") {
+          outbox.markDelivered(requestId);
+          io.print(`context accepted by ${parsed.recipient}: ${requestId}`);
+        } else {
+          outbox.markAnswered(requestId, answer);
+          io.print(`answer ready from ${parsed.recipient}: ${requestId}`);
+        }
       },
       (error) => {
         outbox.markFailed(requestId, error);
-        io.print(`question to ${input.recipient} failed: ${requestId}`);
+        io.print(`${parsed.kind} to ${parsed.recipient} failed: ${requestId}`);
       },
     );
     return { requestId, status: "pending" as const };
@@ -257,7 +286,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const approvals = new ApprovalQueue(io, handleApproval);
 
   async function handleMessage(message: WireEnvelope): Promise<void> {
-    if (message.sender.userId === actor.userId) return;
+    const crossSessionAsk =
+      message.type === "question.ask" && Boolean(message.payload.sourceSessionId);
+    if (message.sender.userId === actor.userId && !crossSessionAsk) return;
     switch (message.type) {
       case "intent.announce": {
         io.print(

@@ -111,13 +111,25 @@ someone else's name, and every answer is tied to a verified identity.
 # Each teammate signs into Lineage once on their computer:
 lineage login --domain dev-xyz.us.auth0.com --client-id <client-id> --audience "https://lineage/api"
 
-# The host automatically uses that saved Auth0 tenant and reuses this repo's token:
+# The host automatically uses that saved Auth0 tenant:
 lineage host --port 8787
 
-# Each teammate pastes the printed command once; their verified userId is inferred:
-lineage join --relay ws://<host>:8787 --token <token>
+# Each teammate pastes the token-free command once; their verified userId is inferred:
+lineage join --relay ws://<host>:8787
 lineage run claude
 ```
+
+The first time a verified teammate connects, the host terminal asks whether to
+approve them. Approval is stored in `.git/lineage/members.json`; later sessions
+reconnect without another prompt. Hosts can inspect or revoke access with:
+
+```bash
+lineage members list
+lineage members revoke lorena@example.com
+```
+
+Revocation takes effect on that identity's next connection. It does not
+terminate an already-connected session.
 
 The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
 and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity.
@@ -125,13 +137,28 @@ The daemon uses it as your userId, so teammates `lineage ask <that-identity>`.
 Login is stored at `~/.lineage/auth.json` with owner-only permissions and
 refreshes automatically. `lineage logout` removes it for the whole computer.
 Use `lineage host --no-auth0` to deliberately run a room-token-only relay.
-Authenticated relays require both the saved room token and a valid identity.
+Authenticated host rooms use the verified identity plus host approval instead
+of a shared room token.
 
 The first `lineage host` creates `.git/lineage/host.json`; later starts reuse
-the same token and port. A teammate only runs the printed `lineage join`
-command once because their relay URL and token are also saved under `.git`.
+the same port. A teammate only runs the printed `lineage join` command once
+because their relay URL and approved identity are remembered.
 If the host's LAN IP changes, rerun `lineage join --relay ws://<new-ip>:<port>`;
-the saved token and user identity fill in automatically.
+the saved connection settings and user identity fill in automatically.
+
+Questions may address an online teammate by full Auth0 identity, email prefix,
+or a unique Git-name token. For example, `dawang` resolves to
+`dawang.zhang24@gmail.com` when Dawang is the only online match. Ambiguous
+aliases return the matching identities and require clarification.
+
+The same `lineage_ask` tool also carries one-way session context with
+`kind: "context"`. The recipient accepts or rejects it; acceptance injects the
+context into that agent session without requiring a reply. Context from another
+user still requires approval. Two Claude terminals on one computer work with
+the same login and daemon: `lineage run claude` gives each terminal a session
+ID, routes the event to the other session, and accepts same-user context
+automatically. Keep the first Lineage-run session open because it owns the
+shared daemon for that repository.
 
 ### Demo beats
 

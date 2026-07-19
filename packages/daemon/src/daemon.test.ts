@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { IntentConflict, Provider } from "@lineage/contracts";
+import { renderInboundAgentRequest, type IntentConflict, type Provider } from "@lineage/contracts";
 import { MockLineageCore, fixtureIntent } from "@lineage/contracts/testing";
 import { createFakeIssuer, startRelay, type RelayHandle } from "@lineage/relay";
 import { TransportError } from "@lineage/transport";
@@ -68,6 +68,7 @@ async function startTestDaemon(
   const handle = await startDaemon({
     cwd: options.cwd ?? stateDir,
     io,
+    auth: null,
     stateDir,
     repoId: "repo-1",
     network: { relayUrl: relay!.url, roomToken: TOKEN, userId, provider },
@@ -130,6 +131,29 @@ describe("daemon", () => {
     const entries = await bob.client.inbox();
     expect(entries).toHaveLength(1);
     expect(entries[0]!.status).toBe("answered");
+  });
+
+  test("accepted context is injected without requiring an agent reply", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const alice = await startTestDaemon("alice", "claude");
+    let injected = "";
+    const bob = await startTestDaemon("bob", "codex", {
+      io: new ScriptedIo(["a"]),
+      answerer: async ({ request }) => {
+        injected = renderInboundAgentRequest(request);
+      },
+    });
+
+    const accepted = await alice.client.ask({
+      recipient: "bob",
+      kind: "context",
+      text: "I am adding reservation expiry and changing the cart schema.",
+    });
+    await bob.handle.approvals.idle();
+    expect(accepted.text).toBe("Context accepted");
+    expect(injected).toContain('kind="context"');
+    expect(injected).toContain("No reply is required");
+    expect((await bob.client.inbox())[0]!.status).toBe("answered");
   });
 
   test("rejection surfaces as request_rejected for the asker", async () => {
