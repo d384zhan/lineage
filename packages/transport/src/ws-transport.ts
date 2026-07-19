@@ -54,15 +54,14 @@ export class WebSocketLineageTransport implements LineageTransport {
   private readonly pendingAsks = new Map<string, Deferred<AgentAnswer>>();
   private readonly handlers = new Set<MessageHandler>();
   private readonly ackTimeoutMs: number;
-  private readonly askTimeoutMs: number;
+  private readonly askTimeoutMs: number | undefined;
   private readonly initialBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly log: (line: string) => void;
 
   constructor(options: TransportOptions = {}) {
-    // Initial host approval may involve a human. Normal acks still arrive immediately.
-    this.ackTimeoutMs = options.ackTimeoutMs ?? 120_000;
-    this.askTimeoutMs = options.askTimeoutMs ?? 120_000;
+    this.ackTimeoutMs = options.ackTimeoutMs ?? 10_000;
+    this.askTimeoutMs = options.askTimeoutMs;
     this.initialBackoffMs = options.initialBackoffMs ?? 500;
     this.maxBackoffMs = options.maxBackoffMs ?? 8_000;
     this.log = options.log ?? (() => {});
@@ -83,13 +82,17 @@ export class WebSocketLineageTransport implements LineageTransport {
     const parsed = AskInputSchema.parse(input);
     const requestId = suppliedRequestId ?? crypto.randomUUID();
     const answer = deferred<AgentAnswer>();
-    const timer = setTimeout(() => {
-      this.pendingAsks.delete(requestId);
-      answer.reject(
-        new TransportError("request_timeout", `No answer within ${this.askTimeoutMs}ms`),
-      );
-    }, this.askTimeoutMs);
-    answer.promise.finally(() => clearTimeout(timer)).catch(() => {});
+    const timer = this.askTimeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          this.pendingAsks.delete(requestId);
+          answer.reject(
+            new TransportError("request_timeout", `No answer within ${this.askTimeoutMs}ms`),
+          );
+        }, this.askTimeoutMs);
+    answer.promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }).catch(() => {});
     this.pendingAsks.set(requestId, answer);
 
     const envelope = this.buildEnvelope({
@@ -113,7 +116,7 @@ export class WebSocketLineageTransport implements LineageTransport {
         await routed;
       } catch (error) {
         this.pendingAsks.delete(requestId);
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         throw error;
       }
     }
@@ -180,25 +183,34 @@ export class WebSocketLineageTransport implements LineageTransport {
         ...(config.accessToken ? { accessToken: config.accessToken } : {}),
       },
     });
-    await this.sendWithAck(hello);
+    // Host approval is human-driven and has no arbitrary timer. Relay errors
+    // and early socket closes still reject this promise immediately.
+    await this.sendWithAck(hello, null);
     this.everConnected = true;
     this.reconnectAttempt = 0;
     this.log(`connected to ${config.relayUrl} as ${config.actor.userId}`);
   }
 
-  private sendWithAck(envelope: WireEnvelope): Promise<Ack> {
+  private sendWithAck(
+    envelope: WireEnvelope,
+    timeoutMs: number | null = this.ackTimeoutMs,
+  ): Promise<Ack> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("Transport connection is not open"));
     }
     const ack = deferred<Ack>();
-    const timer = setTimeout(() => {
-      this.pendingAcks.delete(envelope.id);
-      ack.reject(
-        new TransportError("request_timeout", `Relay did not ack within ${this.ackTimeoutMs}ms`),
-      );
-    }, this.ackTimeoutMs);
-    ack.promise.finally(() => clearTimeout(timer)).catch(() => {});
+    const timer = timeoutMs === null
+      ? undefined
+      : setTimeout(() => {
+          this.pendingAcks.delete(envelope.id);
+          ack.reject(
+            new TransportError("request_timeout", `Relay did not ack within ${timeoutMs}ms`),
+          );
+        }, timeoutMs);
+    ack.promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }).catch(() => {});
     this.pendingAcks.set(envelope.id, ack);
     ws.send(JSON.stringify(envelope));
     return ack.promise;

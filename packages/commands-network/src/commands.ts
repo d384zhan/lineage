@@ -489,12 +489,22 @@ export const logoutCommand = createLogoutCommand();
 
 export const membersCommand: LineageCommand = {
   name: "members",
-  description: "List or revoke host-approved repository members",
+  description: "List, approve, or revoke repository members",
   async run(rawArgs, context) {
     const [action = "list", ...identityParts] = rawArgs;
     const stateDir = resolveStateDir(context.cwd);
     const settings = await readMembershipSettings(stateDir);
-    if (action === "revoke") {
+    if (action === "approve") {
+      const identity = identityParts.join(" ").trim();
+      if (!identity) throw new Error("Usage: lineage members approve <identity>");
+      const exists = settings.members.some(
+        (member) => member.identity.toLowerCase() === identity.toLowerCase(),
+      );
+      if (!exists) {
+        settings.members.push({ identity, approvedAt: new Date().toISOString() });
+        await writeMembershipSettings(stateDir, settings);
+      }
+    } else if (action === "revoke") {
       const identity = identityParts.join(" ").trim();
       if (!identity) throw new Error("Usage: lineage members revoke <identity>");
       const remaining = settings.members.filter(
@@ -506,7 +516,7 @@ export const membersCommand: LineageCommand = {
       settings.members = remaining;
       await writeMembershipSettings(stateDir, settings);
     } else if (action !== "list") {
-      throw new Error("Usage: lineage members [list|revoke <identity>]");
+      throw new Error("Usage: lineage members [list|approve <identity>|revoke <identity>]");
     }
     if (context.json) return settings;
     if (!settings.members.length) return "No approved members.";

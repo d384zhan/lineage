@@ -279,10 +279,11 @@ refs and notes.
 - Room credentials, relay settings, inboxes, and outboxes stay under
   `.git/lineage/` and are not committed.
 
-Inspect or revoke approved members with:
+Manage approved members with:
 
 ```bash
 lineage members list
+lineage members approve teammate@example.com
 lineage members revoke teammate@example.com
 ```
 
@@ -332,7 +333,7 @@ lineage host           Start a repository relay
 lineage join           Save relay and identity settings for a repository
 lineage login          Authenticate this computer through Auth0
 lineage logout         Remove the machine-wide Auth0 login
-lineage members        List or revoke approved repository members
+lineage members        List, approve, or revoke repository members
 lineage ask            Send a question, action request, or one-way context
 lineage inbox          List received messages and their status
 lineage reply          Answer an inbound request by ID

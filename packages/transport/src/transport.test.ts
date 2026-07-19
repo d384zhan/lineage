@@ -62,13 +62,15 @@ describe("WebSocketLineageTransport", () => {
     // NOTE: socket-driven rejections are asserted via try/catch, not
     // expect().rejects — awaiting expect().rejects starves the client
     // WebSocket message events under bun test on Windows.
-    const bad = new WebSocketLineageTransport({ ackTimeoutMs: 500 });
+    const bad = new WebSocketLineageTransport();
     transports.push(bad);
+    const startedAt = Date.now();
     const error = await bad
       .connect(config({ userId: "mallory" }, { roomToken: "wrong" }))
       .then(() => undefined)
       .catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(Error);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 
   test("publish resolves with the relay ack", async () => {
@@ -163,6 +165,21 @@ describe("WebSocketLineageTransport", () => {
       .catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(TransportError);
     expect((error as TransportError).code).toBe("request_timeout");
+  });
+
+  test("asks stay pending by default until answered, rejected, or closed", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const alice = await connected({ userId: "alice", provider: "claude" });
+    await connected({ userId: "bob", provider: "codex" });
+    let settled = false;
+    const pending = alice.ask({ recipient: "bob", text: "Hello?" }).finally(() => {
+      settled = true;
+    });
+    await Bun.sleep(300);
+    expect(settled).toBeFalse();
+    await alice.close();
+    const error = await pending.then(() => undefined).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(TransportError);
   });
 
   test("subscribers receive broadcast intents", async () => {

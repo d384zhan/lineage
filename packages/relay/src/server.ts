@@ -116,6 +116,7 @@ export function startRelay(options: RelayOptions): RelayHandle {
       client.close(4001, "not authenticated");
       return;
     }
+    log(`hello ${envelope.sender.userId} → room ${envelope.repoId}`);
     if (verifier) {
       const token = envelope.payload.accessToken;
       if (!token) {
@@ -147,7 +148,9 @@ export function startRelay(options: RelayOptions): RelayHandle {
         client.close(4001, "identity mismatch");
         return;
       }
+      log(`verified ${identity}`);
       if (options.authorize) {
+        log(`checking membership for ${identity}`);
         const allowed = await options.authorize({
           repoId: envelope.repoId,
           actor: envelope.sender,
@@ -162,6 +165,7 @@ export function startRelay(options: RelayOptions): RelayHandle {
           client.close(4003, "membership denied");
           return;
         }
+        log(`membership approved for ${identity}`);
       } else {
         const expected = resolveToken(envelope.repoId);
         if (!expected || envelope.payload.roomToken !== expected) {

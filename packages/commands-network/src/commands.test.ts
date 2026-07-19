@@ -266,6 +266,10 @@ describe("network commands", () => {
     expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeFalse();
     expect(prompts).toHaveLength(2);
     expect((await readMembershipSettings(stateDir)).members).toHaveLength(1);
+
+    await membersCommand.run(["approve", "lorena@example.com"], { cwd: repo, json: true });
+    expect(await authorize({ repoId: "repo-1", actor: { userId: "lorena@example.com" } })).toBeTrue();
+    expect(prompts).toHaveLength(2);
   });
 
   test("adds Git identity aliases without requiring another join", async () => {
