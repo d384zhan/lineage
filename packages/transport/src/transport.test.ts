@@ -265,6 +265,28 @@ describe("WebSocketLineageTransport", () => {
     expect(error).toBeInstanceOf(Error);
   });
 
+  test("does not wait forever when a relay never acknowledges hello", async () => {
+    const audience = "https://lineage.example/api";
+    const issuer = await createFakeIssuer({ audience });
+    relay = startRelay({
+      port: 0,
+      token: TOKEN,
+      auth: { issuer: issuer.issuer, audience, jwks: issuer.jwks },
+      authorize: async () => await new Promise<boolean>(() => {}),
+    });
+    const accessToken = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const transport = new WebSocketLineageTransport({ ackTimeoutMs: 50 });
+    transports.push(transport);
+
+    const error = await transport.connect(config(
+      { userId: "alice@example.com", provider: "claude" },
+      { accessToken },
+    )).then(() => undefined).catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(TransportError);
+    expect((error as TransportError).code).toBe("request_timeout");
+  });
+
   test("reconnects after a relay restart and keeps working", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const port = relay.port;

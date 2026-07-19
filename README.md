@@ -130,8 +130,8 @@ On the host computer, from the project repository:
 lineage host --port 8787
 ```
 
-The terminal prints the LAN join command. Leave it running. The first time a
-verified teammate connects, the host approves or rejects that identity.
+The terminal prints the LAN join command. Leave it running. Auth0-verified
+teammates connect automatically.
 
 ### 3. Join from each computer
 
@@ -272,20 +272,10 @@ refs and notes.
   returned transiently and is never written to Git notes or the Lineage index.
 - User prompt-hook context and repository authorship summaries remain in daemon
   memory and are not persisted to Git or the relay.
-- Auth0 verifies identity. The host separately approves repository membership.
-- Host approvals live in `.git/lineage/members.json` with owner-only
-  permissions. Revocation blocks the identity's next connection but does not
-  terminate an already-connected socket.
+- Auth0 verifies the identity of every participant before they enter the
+  repository room.
 - Room credentials, relay settings, inboxes, and outboxes stay under
   `.git/lineage/` and are not committed.
-
-Manage approved members with:
-
-```bash
-lineage members list
-lineage members approve teammate@example.com
-lineage members revoke teammate@example.com
-```
 
 ## Different networks
 

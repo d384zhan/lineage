@@ -253,16 +253,11 @@ export const hostCommand: LineageCommand = {
       throw new Error("--auth0-domain and --auth0-audience must be set together");
     }
     const repoId = await readRepoId(context.cwd);
-    const membershipReadline = auth0Domain
-      ? createInterface({ input: process.stdin, output: process.stdout })
-      : undefined;
-    const authorize = auth0Domain
-      ? await createHostMembershipAuthorizer({
-          repoId,
-          stateDir,
-          ...(login?.identity ? { hostIdentity: login.identity } : {}),
-          prompt: (question) => membershipReadline!.question(question),
-        })
+    // Auth0 already proves who is connecting. Keep connection setup
+    // non-interactive so an agent launch cannot wait on a hidden terminal
+    // approval prompt. Repository IDs still isolate relay rooms.
+    const authorize: MembershipAuthorizer | undefined = auth0Domain
+      ? async (request) => request.repoId === repoId
       : undefined;
     const relay = startRelay({
       port,
@@ -292,7 +287,7 @@ export const hostCommand: LineageCommand = {
     console.log("");
     console.log("For other networks, expose it with:");
     console.log(`  lineage tunnel --port ${relay.port}`);
-    console.log(auth0Domain ? "  (verified teammates request host approval)" : `  (room token: ${token})`);
+    console.log(auth0Domain ? "  (verified teammates connect automatically)" : `  (room token: ${token})`);
     return NEVER;
   },
 };

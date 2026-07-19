@@ -217,9 +217,7 @@ export class WebSocketLineageTransport implements LineageTransport {
         ...(config.accessToken ? { accessToken: config.accessToken } : {}),
       },
     });
-    // Host approval is human-driven and has no arbitrary timer. Relay errors
-    // and early socket closes still reject this promise immediately.
-    await this.sendWithAck(hello, null);
+    await this.sendWithAck(hello);
     this.joined = true;
     this.everConnected = true;
     this.reconnectAttempt = 0;
