@@ -42,28 +42,35 @@ bun run typecheck
 One-time on each laptop: install [Bun](https://bun.sh), Git, and the agent CLI
 (`claude` and/or `codex`), then `bun install && bun link` in this repo.
 
+In the repository where you want to use Lineage, run `lineage init` once on
+each computer. It derives the same room identity from the Git `origin`, stores
+everything under `.git/lineage/`, registers installed Claude/Codex MCP clients,
+and indexes existing sessions. It does not change the worktree or require a
+commit. Rerun it after installing another agent CLI.
+
 ### Laptop A (hosts the relay, runs Claude)
 
 ```bash
-lineage init                       # once per repo; commits .lineage/repo.json
+lineage init                       # local setup; no files to commit
 lineage host --port 8787           # terminal 1 — prints the room token
-lineage tunnel --port 8787         # terminal 2 — prints wss://xyz.trycloudflare.com
-                                   #   (needs: winget install Cloudflare.cloudflared)
 lineage join --relay ws://localhost:8787 --token <token> --user alice --provider claude
-lineage index                      # indexes existing Claude + Codex sessions
-lineage daemon                     # terminal 3 — go online; approvals happen HERE
-lineage run claude                 # terminal 4 — Claude with lineage MCP + capture
+lineage daemon                     # terminal 2 — go online; approvals happen HERE
+claude                             # terminal 3 — launch normally
+# or: lineage run claude           # optional wrapper; refreshes the index on exit
 ```
 
 ### Laptop B (clones the repo, runs Codex)
 
 ```bash
-# clone the repo (which contains the committed .lineage/repo.json)
-lineage join --relay wss://xyz.trycloudflare.com --token <token> --user bob --provider codex
-lineage index
+# clone the same Git repository; its origin produces the same Lineage room id
+lineage init
+lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider codex
 lineage daemon                     # terminal 1
-lineage run codex                  # terminal 2
+codex                              # terminal 2; `lineage run codex` is optional
 ```
+
+For computers on different networks, laptop A can run
+`lineage tunnel --port 8787` and laptop B can use the printed `wss://` URL.
 
 ### Demo beats
 
@@ -88,6 +95,10 @@ lineage run codex                  # terminal 2
 
 - Room secrets, relay URLs, and daemon state live under `.git/lineage/` and are
   never committed. Git notes carry only approved structured decisions.
+- Repository identity is a stable hash of the normalized Git `origin`, so SSH
+  and HTTPS clones meet in the same room without a committed Lineage file. A
+  repository without an origin falls back to its first commit; an empty local
+  repository can use `lineage init --repo-id <shared-id>`.
 - `~/.lineage/prompt-index.json` is private to one machine. It stores hashes,
   timestamps, touched files, and pointers into native agent JSONL files, not
   prompt text. Exact prompts are reread only after approval and are never sent
@@ -97,6 +108,9 @@ lineage run codex                  # terminal 2
 - Both Claude Code and Codex native session logs are indexed. `lineage run`
   refreshes the index after the agent exits; `lineage index` imports existing
   history, including sessions created before Lineage was installed.
+- The wrapper is optional after `lineage init`. Launching Claude or Codex
+  normally still exposes the Lineage MCP tools. Run `lineage index` whenever
+  you want to refresh sessions created outside the wrapper.
 - Live agents are never injected mid-turn: approved questions run a one-shot
   headless sub-agent, and are also surfaced through `lineage_inbox` / appended
   to MCP tool results for agents already at work.

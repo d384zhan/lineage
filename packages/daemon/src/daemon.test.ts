@@ -188,9 +188,9 @@ describe("daemon", () => {
     runGit(repo, ["init", "-q"]);
     runGit(repo, ["config", "user.email", "test@example.com"]);
     runGit(repo, ["config", "user.name", "Joe"]);
-    mkdirSync(join(repo, ".lineage"), { recursive: true });
+    mkdirSync(join(repo, ".git", "lineage"), { recursive: true });
     mkdirSync(join(repo, "src"), { recursive: true });
-    await Bun.write(join(repo, ".lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
+    await Bun.write(join(repo, ".git", "lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
     const exactPrompt = "Use cookies because authentication must be readable during server rendering";
     await Bun.write(join(claudeRoot, "joe.jsonl"), [
       JSON.stringify({ type: "user", sessionId: "joe-session", cwd: repo, timestamp: new Date().toISOString(), message: { content: exactPrompt } }),

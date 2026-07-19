@@ -61,7 +61,8 @@ describe("history commands", () => {
     expect(first.conflicts).toHaveLength(0);
     expect(second.conflicts).toHaveLength(1);
     expect(timeline.entries).toHaveLength(2);
-    expect(await Bun.file(join(cwd, ".lineage/repo.json")).exists()).toBeTrue();
+    expect(await Bun.file(join(cwd, ".git/lineage/repo.json")).exists()).toBeTrue();
+    expect(await Bun.file(join(cwd, ".lineage/repo.json")).exists()).toBeFalse();
   });
 
   test("links a commit and resolves positional why queries as paths", async () => {

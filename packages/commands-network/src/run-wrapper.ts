@@ -7,16 +7,12 @@ import {
 import { refreshPromptIndex } from "@lineage/prompt-index";
 import {
   DaemonClient,
+  readRepoId,
   readNetworkSettings,
   resolveExecutable,
   resolveStateDir,
   findRepoRoot,
 } from "@lineage/daemon";
-import {
-  codexConfigHasLineage,
-  codexConfigSnippet,
-  ensureClaudeMcpConfig,
-} from "./mcp-register";
 
 export interface RunAgentOptions {
   cwd: string;
@@ -60,6 +56,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const print = options.print ?? ((line: string) => console.log(line));
   const repoRoot = findRepoRoot(options.cwd);
   if (!repoRoot) throw new Error(`Not inside a Git repository: ${options.cwd}`);
+  await readRepoId(options.cwd);
 
   const stateDir = resolveStateDir(options.cwd);
   const network = await readNetworkSettings(stateDir);
@@ -71,18 +68,6 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     print(
       "Note: the lineage daemon is not running — teammates will not see live activity. Start `lineage daemon` in another terminal.",
     );
-  }
-
-  if (options.provider === "claude") {
-    const outcome = await ensureClaudeMcpConfig(repoRoot);
-    if (outcome !== "unchanged") print(`Registered lineage MCP server in .mcp.json (${outcome}).`);
-  } else {
-    if (!(await codexConfigHasLineage())) {
-      print("Codex is missing the lineage MCP server. Add this to ~/.codex/config.toml:");
-      print("");
-      print(codexConfigSnippet());
-      print("");
-    }
   }
 
   const sessionId = crypto.randomUUID();

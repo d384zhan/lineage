@@ -28,8 +28,8 @@ describe("private global prompt index", () => {
   test("indexes Claude and Codex pointers without copying prompt text", async () => {
     const repo = temp("lineage-index-repo-");
     git(repo, ["init", "-q"]);
-    mkdirSync(join(repo, ".lineage"), { recursive: true });
-    await Bun.write(join(repo, ".lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
+    mkdirSync(join(repo, ".git", "lineage"), { recursive: true });
+    await Bun.write(join(repo, ".git", "lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
 
     const claudeRoot = temp("lineage-index-claude-");
     const codexRoot = temp("lineage-index-codex-");
@@ -65,9 +65,9 @@ describe("private global prompt index", () => {
     git(repo, ["init", "-q"]);
     git(repo, ["config", "user.email", "test@example.com"]);
     git(repo, ["config", "user.name", "Test User"]);
-    mkdirSync(join(repo, ".lineage"), { recursive: true });
+    mkdirSync(join(repo, ".git", "lineage"), { recursive: true });
     mkdirSync(join(repo, "src"), { recursive: true });
-    await Bun.write(join(repo, ".lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
+    await Bun.write(join(repo, ".git", "lineage", "repo.json"), JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }));
     const promptTime = new Date().toISOString();
     const claudeRoot = temp("lineage-match-claude-");
     const codexRoot = temp("lineage-match-codex-");

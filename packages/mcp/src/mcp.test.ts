@@ -49,15 +49,16 @@ async function makeTempRepo(): Promise<string> {
   tempDirs.push(dir);
   const git = Bun.spawn(["git", "init", "-q"], { cwd: dir });
   if ((await git.exited) !== 0) throw new Error("git init failed");
-  mkdirSync(join(dir, ".lineage"), { recursive: true });
+  mkdirSync(join(dir, ".git", "lineage"), { recursive: true });
   await Bun.write(
-    join(dir, ".lineage", "repo.json"),
+    join(dir, ".git", "lineage", "repo.json"),
     JSON.stringify({ protocolVersion: 1, repoId: "repo-1" }, null, 2),
   );
+  await Bun.write(join(dir, "README.md"), "# Test repository\n");
   for (const args of [
     ["config", "user.email", "test@example.com"],
     ["config", "user.name", "Test User"],
-    ["add", ".lineage/repo.json"],
+    ["add", "README.md"],
     ["commit", "-qm", "Initialize repository"],
   ]) {
     const command = Bun.spawn(["git", ...args], { cwd: dir });
