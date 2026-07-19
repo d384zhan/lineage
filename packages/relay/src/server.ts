@@ -6,6 +6,7 @@ import {
   type WireEnvelope,
 } from "@lineage/contracts";
 import type { Server } from "bun";
+import { createTokenVerifier, type RelayAuthOptions } from "./auth";
 import { choosePort } from "./ports";
 import { RoomRegistry, type Client, type ClientState } from "./rooms";
 
@@ -17,6 +18,11 @@ export interface RelayOptions {
   port: number;
   /** Shared token for every room, or a per-room resolver. */
   token: RoomTokenResolver;
+  /**
+   * When set, hello frames must carry a JWT issued by this tenant; the room
+   * token is not checked and userIds must match the token's identity.
+   */
+  auth?: RelayAuthOptions;
   hostname?: string;
   log?: (line: string) => void;
 }
@@ -81,6 +87,7 @@ export function startRelay(options: RelayOptions): RelayHandle {
     typeof options.token === "string"
       ? () => options.token as string
       : options.token;
+  const verifier = options.auth ? createTokenVerifier(options.auth) : undefined;
 
   function broadcastPresence(
     repoId: string,
@@ -94,17 +101,50 @@ export function startRelay(options: RelayOptions): RelayHandle {
     }
   }
 
-  function handleHello(client: Client, envelope: WireEnvelope): void {
+  async function handleHello(client: Client, envelope: WireEnvelope): Promise<void> {
     if (envelope.type !== "hello") {
       sendError(client, envelope.repoId, "invalid_token", "First message must be hello");
       client.close(4001, "not authenticated");
       return;
     }
-    const expected = resolveToken(envelope.repoId);
-    if (!expected || envelope.payload.roomToken !== expected) {
-      sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
-      client.close(4001, "invalid token");
-      return;
+    if (verifier) {
+      const token = envelope.payload.accessToken;
+      if (!token) {
+        sendError(
+          client,
+          envelope.repoId,
+          "invalid_token",
+          "This relay requires an access token; run `lineage login` first",
+        );
+        client.close(4001, "missing access token");
+        return;
+      }
+      let identity: string;
+      try {
+        identity = await verifier.verify(token);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        sendError(client, envelope.repoId, "invalid_token", `Access token rejected: ${reason}`);
+        client.close(4001, "invalid access token");
+        return;
+      }
+      if (identity !== envelope.sender.userId) {
+        sendError(
+          client,
+          envelope.repoId,
+          "invalid_token",
+          `userId "${envelope.sender.userId}" does not match authenticated identity "${identity}"`,
+        );
+        client.close(4001, "identity mismatch");
+        return;
+      }
+    } else {
+      const expected = resolveToken(envelope.repoId);
+      if (!expected || envelope.payload.roomToken !== expected) {
+        sendError(client, envelope.repoId, "invalid_token", "Room token rejected");
+        client.close(4001, "invalid token");
+        return;
+      }
     }
     const replaced = rooms.join(envelope.repoId, envelope.sender, client);
     if (replaced) replaced.close(4002, "replaced by newer connection");
@@ -127,6 +167,17 @@ export function startRelay(options: RelayOptions): RelayHandle {
     const repoId = client.data.repoId!;
     if (envelope.repoId !== repoId) {
       sendError(client, repoId, "invalid_token", "Envelope repoId does not match joined room");
+      return;
+    }
+    // Clients do not relay acks/errors through the room; drop silently.
+    if (envelope.type === "ack" || envelope.type === "error") return;
+    if (envelope.sender.userId !== client.data.actor?.userId) {
+      sendError(
+        client,
+        repoId,
+        "invalid_token",
+        "Envelope sender does not match the authenticated connection",
+      );
       return;
     }
     switch (envelope.type) {
@@ -160,14 +211,10 @@ export function startRelay(options: RelayOptions): RelayHandle {
         sendAck(client, repoId, envelope.id);
         return;
       }
-      case "ack":
-      case "error":
-        // Clients do not relay acks/errors through the room; drop silently.
-        return;
     }
   }
 
-  function handleMessage(ws: Client, raw: string | Buffer): void {
+  async function handleMessage(ws: Client, raw: string | Buffer): Promise<void> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(typeof raw === "string" ? raw : raw.toString());
@@ -191,7 +238,14 @@ export function startRelay(options: RelayOptions): RelayHandle {
       return;
     }
     if (!ws.data.authed) {
-      handleHello(ws, result.data);
+      // Drop frames that race an in-flight (async) hello verification.
+      if (ws.data.authPending) return;
+      ws.data.authPending = true;
+      try {
+        await handleHello(ws, result.data);
+      } finally {
+        ws.data.authPending = false;
+      }
     } else {
       handleAuthed(ws, result.data);
     }
@@ -210,11 +264,9 @@ export function startRelay(options: RelayOptions): RelayHandle {
         },
         websocket: {
           message(ws, raw) {
-            try {
-              handleMessage(ws, raw);
-            } catch (error) {
+            handleMessage(ws, raw).catch((error) => {
               log(`handler crashed: ${error instanceof Error ? error.stack : String(error)}`);
-            }
+            });
           },
           close(ws) {
             if (!ws.data.authed || !ws.data.repoId || !ws.data.actor) return;

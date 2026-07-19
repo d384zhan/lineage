@@ -7,14 +7,22 @@ import {
 } from "@lineage/contracts";
 import {
   DaemonClient,
+  deleteAuthSettings,
   detectGitIdentities,
   parseGitIdentity,
+  pollForTokens,
+  readAuthSettings,
   readNetworkSettings,
   readRepoId,
+  requestDeviceCode,
   resolveStateDir,
   startDaemon,
+  toAuthSettings,
+  writeAuthSettings,
   writeNetworkSettings,
   type ApprovalIo,
+  type Fetcher,
+  type OAuthConfig,
 } from "@lineage/daemon";
 import { startRelay } from "@lineage/relay";
 import { TransportError } from "@lineage/transport";
@@ -130,8 +138,23 @@ export const hostCommand: LineageCommand = {
       throw new Error("--port must be a valid TCP port");
     }
     const token = args.get("token") ?? crypto.randomUUID().replaceAll("-", "");
-    const relay = startRelay({ port, token, log: (line) => console.log(`[relay] ${line}`) });
+    const auth0Domain = args.get("auth0-domain") ?? process.env["LINEAGE_AUTH0_DOMAIN"];
+    const auth0Audience = args.get("auth0-audience") ?? process.env["LINEAGE_AUTH0_AUDIENCE"];
+    if ((auth0Domain && !auth0Audience) || (!auth0Domain && auth0Audience)) {
+      throw new Error("--auth0-domain and --auth0-audience must be set together");
+    }
+    const relay = startRelay({
+      port,
+      token,
+      ...(auth0Domain && auth0Audience
+        ? { auth: { issuer: auth0Domain, audience: auth0Audience } }
+        : {}),
+      log: (line) => console.log(`[relay] ${line}`),
+    });
     console.log(`lineage relay listening on ws://localhost:${relay.port}`);
+    if (auth0Domain) {
+      console.log(`Auth0 verification enabled (${auth0Domain}); joiners must \`lineage login\` first.`);
+    }
     console.log("");
     console.log("Teammates on this network join with:");
     console.log(`  lineage join --relay ws://<your-ip>:${relay.port} --token ${token} --user <name>`);
@@ -254,6 +277,73 @@ export const identityCommand: LineageCommand = {
     return identities.length
       ? identities.map((identity) => `${identity.name} <${identity.email}>`).join("\n")
       : "No Git identities configured.";
+  },
+};
+
+export interface LoginDependencies {
+  fetcher?: Fetcher;
+  sleep?: (ms: number) => Promise<void>;
+  print?: (line: string) => void;
+}
+
+export function createLoginCommand(dependencies: LoginDependencies = {}): LineageCommand {
+  return {
+    name: "login",
+    description: "Sign in with Auth0 so relays can verify your identity",
+    async run(rawArgs, context) {
+      const print = dependencies.print ?? ((line: string) => console.log(line));
+      const args = new CommandArguments(rawArgs);
+      const stateDir = resolveStateDir(context.cwd);
+      const stored = await readAuthSettings(stateDir).catch(() => undefined);
+      const domain =
+        args.get("domain") ?? process.env["LINEAGE_AUTH0_DOMAIN"] ?? stored?.domain;
+      const clientId =
+        args.get("client-id") ?? process.env["LINEAGE_AUTH0_CLIENT_ID"] ?? stored?.clientId;
+      const audience =
+        args.get("audience") ?? process.env["LINEAGE_AUTH0_AUDIENCE"] ?? stored?.audience;
+      if (!domain || !clientId || !audience) {
+        throw new Error(
+          [
+            "Auth0 tenant settings are missing. Provide them once via flags or env vars:",
+            '  lineage login --domain dev-xyz.us.auth0.com --client-id <id> --audience "https://lineage/api"',
+            "  (or set LINEAGE_AUTH0_DOMAIN / LINEAGE_AUTH0_CLIENT_ID / LINEAGE_AUTH0_AUDIENCE)",
+            "See README.md → \"Auth0 identity\" for tenant setup steps.",
+          ].join("\n"),
+        );
+      }
+      const config: OAuthConfig = { domain, clientId, audience };
+      const device = await requestDeviceCode(config, dependencies.fetcher);
+      print("To sign in, open this URL in any browser:");
+      print(`  ${device.verification_uri_complete ?? device.verification_uri}`);
+      print(`and confirm the code: ${device.user_code}`);
+      print("Waiting for the browser login...");
+      const tokens = await pollForTokens(config, device, {
+        ...(dependencies.fetcher ? { fetcher: dependencies.fetcher } : {}),
+        ...(dependencies.sleep ? { sleep: dependencies.sleep } : {}),
+      });
+      const settings = toAuthSettings(config, tokens);
+      await writeAuthSettings(stateDir, settings);
+      if (context.json) {
+        return { identity: settings.identity, expiresAt: settings.expiresAt };
+      }
+      return [
+        `Signed in as ${settings.identity}.`,
+        `The daemon will connect with this identity as your userId${
+          settings.refreshToken ? " and refresh the session automatically" : ""
+        }.`,
+      ].join("\n");
+    },
+  };
+}
+
+export const loginCommand = createLoginCommand();
+
+export const logoutCommand: LineageCommand = {
+  name: "logout",
+  description: "Remove the stored Auth0 login for this repo",
+  async run(_rawArgs, context) {
+    deleteAuthSettings(resolveStateDir(context.cwd));
+    return context.json ? { ok: true } : "Logged out. `lineage daemon` will connect unauthenticated.";
   },
 };
 
@@ -453,6 +543,8 @@ export const networkCommands: readonly LineageCommand[] = [
   tunnelCommand,
   joinCommand,
   identityCommand,
+  loginCommand,
+  logoutCommand,
   daemonCommand,
   runCommand,
   indexCommand,

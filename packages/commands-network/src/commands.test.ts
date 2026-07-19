@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLineageCore } from "@lineage/contracts/testing";
 import {
+  readAuthSettings,
   readNetworkSettings,
   startDaemon,
   type ApprovalIo,
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createInitCommand, identityCommand, inboxCommand, initCommand, joinCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createInitCommand, createLoginCommand, identityCommand, inboxCommand, initCommand, joinCommand, logoutCommand, replyCommand } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -381,5 +382,109 @@ describe("run wrapper", () => {
     expect(index.entries).toHaveLength(1);
     expect(index.entries[0]!.sessionId).toBe("claude-session");
     expect(JSON.stringify(index)).not.toContain("demo prompt");
+  });
+});
+
+describe("login command", () => {
+  function fakeJwt(claims: Record<string, unknown>): string {
+    const encode = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(claims)}.signature`;
+  }
+
+  test("walks the device flow and stores the verified identity", async () => {
+    const repo = await makeTempRepo();
+    const accessToken = fakeJwt({ sub: "auth0|7", email: "loren@example.com" });
+    let polls = 0;
+    const auth0 = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/oauth/device/code") {
+          return Response.json({
+            device_code: "device-123",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://issuer.test/activate",
+            expires_in: 300,
+            interval: 1,
+          });
+        }
+        if (url.pathname === "/oauth/token") {
+          polls += 1;
+          if (polls === 1) {
+            return Response.json({ error: "authorization_pending" }, { status: 403 });
+          }
+          return Response.json({
+            access_token: accessToken,
+            refresh_token: "refresh-1",
+            expires_in: 3600,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      const printed: string[] = [];
+      const login = createLoginCommand({
+        sleep: async () => {},
+        print: (line) => printed.push(line),
+      });
+      const result = await login.run(
+        [
+          "--domain", `http://127.0.0.1:${auth0.port}`,
+          "--client-id", "client-1",
+          "--audience", "https://lineage.example/api",
+        ],
+        { cwd: repo, json: true },
+      );
+      expect(result).toEqual({
+        identity: "loren@example.com",
+        expiresAt: expect.any(String),
+      });
+      expect(printed.join("\n")).toContain("ABCD-EFGH");
+
+      const stateDir = join(repo, ".git", "lineage");
+      const stored = await readAuthSettings(stateDir);
+      expect(stored!.accessToken).toBe(accessToken);
+      expect(stored!.identity).toBe("loren@example.com");
+
+      // Re-login reuses the stored tenant settings without flags.
+      const again = await login.run([], { cwd: repo, json: true });
+      expect(again).toEqual({
+        identity: "loren@example.com",
+        expiresAt: expect.any(String),
+      });
+
+      await logoutCommand.run([], { cwd: repo, json: true });
+      expect(await readAuthSettings(stateDir)).toBeUndefined();
+    } finally {
+      auth0.stop(true);
+    }
+  });
+
+  test("explains what to do when tenant settings are missing", async () => {
+    const repo = await makeTempRepo();
+    const saved = {
+      domain: process.env["LINEAGE_AUTH0_DOMAIN"],
+      clientId: process.env["LINEAGE_AUTH0_CLIENT_ID"],
+      audience: process.env["LINEAGE_AUTH0_AUDIENCE"],
+    };
+    delete process.env["LINEAGE_AUTH0_DOMAIN"];
+    delete process.env["LINEAGE_AUTH0_CLIENT_ID"];
+    delete process.env["LINEAGE_AUTH0_AUDIENCE"];
+    try {
+      const login = createLoginCommand({ print: () => {} });
+      const error = await login
+        .run([], { cwd: repo, json: false })
+        .then(() => undefined)
+        .catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("LINEAGE_AUTH0_DOMAIN");
+    } finally {
+      if (saved.domain !== undefined) process.env["LINEAGE_AUTH0_DOMAIN"] = saved.domain;
+      if (saved.clientId !== undefined) process.env["LINEAGE_AUTH0_CLIENT_ID"] = saved.clientId;
+      if (saved.audience !== undefined) process.env["LINEAGE_AUTH0_AUDIENCE"] = saved.audience;
+    }
   });
 });

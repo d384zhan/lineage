@@ -75,6 +75,19 @@ Two clarifications pinned down by the transport implementation:
 - The relay also acks the `hello` envelope; clients use that ack as the
   connect-success signal.
 
+### Optional Auth0 identity
+
+The `hello` payload carries an optional `accessToken` (a JWT), and
+`ConnectionConfig` mirrors the field. A relay started **without** auth
+configuration ignores it and keeps room-token behavior. A relay started
+**with** auth configuration (issuer + audience) requires the token, verifies
+it against the issuer's JWKS (RS256, `iss`/`aud`/`exp`), derives the caller's
+identity as `email claim ?? sub`, and rejects the hello with `invalid_token`
+unless `sender.userId` equals that identity. Room-token equality is not
+checked in this mode; the JWT is the room gate. After a successful hello the
+relay also rejects any later envelope whose `sender.userId` differs from the
+authenticated one.
+
 After a local `core.announce`, publish its returned `intent` as an
 `intent.announce` envelope. When a remote envelope arrives, pass its payload to
 `core.ingestRemoteIntent`; the returned conflicts are the local warning set.

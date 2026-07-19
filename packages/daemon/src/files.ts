@@ -26,6 +26,24 @@ export const NetworkSettingsSchema = z.object({
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>;
 
+/**
+ * Auth0 login state written by `lineage login`. Lives under `.git/lineage`
+ * next to network.json and is never committed.
+ */
+export const AuthSettingsSchema = z.object({
+  /** Tenant domain, e.g. "dev-abc.us.auth0.com" (scheme optional). */
+  domain: z.string().min(1),
+  clientId: z.string().min(1),
+  audience: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
+  expiresAt: UtcTimestampSchema,
+  /** Verified identity (email claim, else sub) — the effective userId. */
+  identity: z.string().min(1),
+});
+
+export type AuthSettings = z.infer<typeof AuthSettingsSchema>;
+
 export const DaemonInfoSchema = z.object({
   port: z.number().int().positive(),
   pid: z.number().int().positive(),
@@ -39,6 +57,7 @@ const NETWORK_FILE = "network.json";
 const DAEMON_FILE = "daemon.json";
 export const INBOX_FILE = "inbox.json";
 export const OUTBOX_FILE = "outbox.json";
+const AUTH_FILE = "auth.json";
 
 export function findGitDir(cwd: string): string | undefined {
   let current = cwd;
@@ -101,6 +120,28 @@ export async function writeNetworkSettings(
     join(stateDir, NETWORK_FILE),
     JSON.stringify(NetworkSettingsSchema.parse(settings), null, 2),
   );
+}
+
+export async function readAuthSettings(
+  stateDir: string,
+): Promise<AuthSettings | undefined> {
+  const raw = await readJsonFile(join(stateDir, AUTH_FILE));
+  return raw === undefined ? undefined : AuthSettingsSchema.parse(raw);
+}
+
+export async function writeAuthSettings(
+  stateDir: string,
+  settings: AuthSettings,
+): Promise<void> {
+  mkdirSync(stateDir, { recursive: true });
+  await Bun.write(
+    join(stateDir, AUTH_FILE),
+    JSON.stringify(AuthSettingsSchema.parse(settings), null, 2),
+  );
+}
+
+export function deleteAuthSettings(stateDir: string): void {
+  rmSync(join(stateDir, AUTH_FILE), { force: true });
 }
 
 export async function readDaemonInfo(stateDir: string): Promise<DaemonInfo | undefined> {

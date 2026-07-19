@@ -55,7 +55,11 @@ const EnvelopeBaseSchema = z.object({
 export const WireEnvelopeSchema = z.discriminatedUnion("type", [
   EnvelopeBaseSchema.extend({
     type: z.literal("hello"),
-    payload: z.object({ roomToken: z.string().min(1) }),
+    payload: z.object({
+      roomToken: z.string().min(1),
+      /** Auth0 (or compatible) JWT; required when the relay runs with auth enabled. */
+      accessToken: z.string().min(1).optional(),
+    }),
   }),
   EnvelopeBaseSchema.extend({
     type: z.literal("presence"),
@@ -120,6 +124,7 @@ export const ConnectionConfigSchema = z.object({
   }),
   repoId: IdentifierSchema,
   roomToken: z.string().min(1),
+  accessToken: z.string().min(1).optional(),
   actor: ActorSchema,
 });
 

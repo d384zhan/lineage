@@ -3,6 +3,7 @@ import type { ServerWebSocket } from "bun";
 
 export interface ClientState {
   authed: boolean;
+  authPending?: boolean;
   repoId?: string;
   actor?: Actor;
 }

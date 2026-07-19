@@ -27,8 +27,10 @@ import {
   readRepoId,
   resolveStateDir,
   writeDaemonInfo,
+  type AuthSettings,
   type NetworkSettings,
 } from "./files";
+import { ensureFreshAuth } from "./oauth";
 import {
   buildEnvelope,
   publishAnswer,
@@ -49,6 +51,8 @@ export interface DaemonOptions {
   stateDir?: string;
   repoId?: string;
   network?: NetworkSettings;
+  /** Auth0 login state; undefined loads `.git/lineage/auth.json`, null skips. */
+  auth?: AuthSettings | null;
   httpPort?: number;
   resolvePrompt?: PromptResolver;
   promptIndexOptions?: RefreshIndexOptions;
@@ -80,8 +84,27 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     throw new Error("No relay connection configured. Run `lineage join` first.");
   }
   const gitIdentities = detectGitIdentities(options.cwd, network.gitIdentities ?? []);
+  let auth: AuthSettings | undefined;
+  if (options.auth === undefined) {
+    try {
+      auth = await ensureFreshAuth(stateDir);
+    } catch (error) {
+      io.print(
+        `Auth0 token refresh failed (${
+          error instanceof Error ? error.message : String(error)
+        }); continuing without a verified identity.`,
+      );
+    }
+  } else {
+    auth = options.auth ?? undefined;
+  }
+  if (auth && auth.identity !== network.userId) {
+    io.print(
+      `Using Auth0 identity "${auth.identity}" as userId (network.json says "${network.userId}").`,
+    );
+  }
   const actor: Actor = {
-    userId: network.userId,
+    userId: auth?.identity ?? network.userId,
     ...(network.provider ? { provider: network.provider } : {}),
     ...(gitIdentities.length ? { gitIdentities } : {}),
   };
@@ -274,6 +297,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     relayUrl: network.relayUrl,
     repoId,
     roomToken: network.roomToken,
+    ...(auth ? { accessToken: auth.accessToken } : {}),
     actor,
   });
   const unsubscribe = transport.subscribe(handleMessage);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IntentConflict, Provider } from "@lineage/contracts";
 import { MockLineageCore, fixtureIntent } from "@lineage/contracts/testing";
-import { startRelay, type RelayHandle } from "@lineage/relay";
+import { createFakeIssuer, startRelay, type RelayHandle } from "@lineage/relay";
 import { TransportError } from "@lineage/transport";
 import { DaemonClient } from "./client";
 import { startDaemon, type DaemonHandle, type PromptResolver } from "./daemon";
@@ -292,6 +292,93 @@ describe("daemon", () => {
     expect(
       alice.core.calls.filter((entry) => entry.method === "ingestRemoteIntent"),
     ).toHaveLength(0);
+  });
+
+  test("daemons on an Auth0 relay connect with tokens and use the verified identity", async () => {
+    const audience = "https://lineage.example/api";
+    const issuer = await createFakeIssuer({ audience });
+    relay = startRelay({
+      port: 0,
+      token: TOKEN,
+      auth: { issuer: issuer.issuer, audience, jwks: issuer.jwks },
+    });
+
+    async function authSettings(sub: string, email: string) {
+      return {
+        domain: issuer.issuer,
+        clientId: "client-1",
+        audience,
+        accessToken: await issuer.sign({ sub, email }),
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        identity: email,
+      };
+    }
+
+    const aliceStateDir = mkdtempSync(join(tmpdir(), "lineage-auth-alice-"));
+    const bobStateDir = mkdtempSync(join(tmpdir(), "lineage-auth-bob-"));
+    tempDirs.push(aliceStateDir, bobStateDir);
+    const aliceIo = new ScriptedIo();
+    const alice = await startDaemon({
+      cwd: aliceStateDir,
+      io: aliceIo,
+      stateDir: aliceStateDir,
+      repoId: "repo-1",
+      // network.json still says "alice"; the verified identity must win.
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "claude" },
+      auth: await authSettings("auth0|1", "alice@example.com"),
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+      answerer: async () => {},
+    });
+    daemons.push(alice);
+    expect(alice.actor.userId).toBe("alice@example.com");
+    expect(
+      aliceIo.printed.some((line) => line.includes('Auth0 identity "alice@example.com"')),
+    ).toBeTrue();
+
+    const bob = await startDaemon({
+      cwd: bobStateDir,
+      io: new ScriptedIo(["m", "Because rotation limits replay."]),
+      stateDir: bobStateDir,
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "bob@example.com", provider: "codex" },
+      auth: await authSettings("auth0|2", "bob@example.com"),
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+      answerer: async () => {},
+    });
+    daemons.push(bob);
+
+    const aliceClient = DaemonClient.forPort(alice.port, alice.secret);
+    const answer = await aliceClient.ask({
+      recipient: "bob@example.com",
+      text: "Why rotate refresh tokens?",
+    });
+    expect(answer.mode).toBe("manual");
+    expect(answer.text).toBe("Because rotation limits replay.");
+  });
+
+  test("a daemon without a login cannot join an Auth0 relay", async () => {
+    const audience = "https://lineage.example/api";
+    const issuer = await createFakeIssuer({ audience });
+    relay = startRelay({
+      port: 0,
+      token: TOKEN,
+      auth: { issuer: issuer.issuer, audience, jwks: issuer.jwks },
+    });
+    const stateDir = mkdtempSync(join(tmpdir(), "lineage-auth-anon-"));
+    tempDirs.push(stateDir);
+    const error = await startDaemon({
+      cwd: stateDir,
+      io: new ScriptedIo(),
+      stateDir,
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "claude" },
+      auth: null,
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+      answerer: async () => {},
+    })
+      .then(() => undefined)
+      .catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
   });
 
   test("requests without the daemon secret are refused", async () => {

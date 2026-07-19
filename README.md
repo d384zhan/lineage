@@ -69,6 +69,56 @@ lineage run claude                  # requests and answers interrupt Claude
 For computers on different networks, laptop A can run
 `lineage tunnel --port 8787` and laptop B can use the printed `wss://` URL.
 
+## Auth0 identity (optional)
+
+By default the relay trusts self-declared userIds gated by the shared room
+token. With Auth0 enabled, `lineage login` proves who you are in the browser
+once (OAuth Device Authorization Flow), the daemon connects with that JWT, and
+the relay verifies it against the tenant's JWKS — a joiner cannot claim
+someone else's name, and every answer is tied to a verified identity.
+
+### One-time tenant setup
+
+1. Create a free tenant at [auth0.com](https://auth0.com) and note its domain,
+   e.g. `dev-xyz.us.auth0.com`.
+2. **Applications → Create Application → Native.** In its settings, under
+   *Advanced Settings → Grant Types*, enable **Device Code** (and keep
+   *Refresh Token*). Note the Client ID.
+3. **Applications → APIs → Create API.** Any identifier works, e.g.
+   `https://lineage/api` — this is the *audience*. Under the API's settings,
+   enable **Allow Offline Access** so logins get refresh tokens.
+4. (Recommended) **Actions → Triggers → post-login**: add an Action that copies
+   the login email into the access token, so userIds are emails instead of
+   opaque `auth0|...` subject ids:
+
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     if (event.user.email) {
+       api.accessToken.setCustomClaim("https://lineage.dev/email", event.user.email);
+     }
+   };
+   ```
+
+### Using it
+
+```bash
+# Relay host — require verified identities:
+lineage host --port 8787 --auth0-domain dev-xyz.us.auth0.com --auth0-audience "https://lineage/api"
+
+# Each teammate, inside the repo (once; settings are remembered for re-login):
+lineage login --domain dev-xyz.us.auth0.com --client-id <client-id> --audience "https://lineage/api"
+lineage join --relay ws://<host>:8787 --token <token> --user <your-login-email>
+lineage daemon
+```
+
+The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
+and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity —
+the daemon uses it as your userId (overriding `join --user` if they differ), so
+teammates `lineage ask <that-identity>`. Tokens are stored in
+`.git/lineage/auth.json` (never committed) and refreshed automatically;
+`lineage logout` removes them. A relay started without the `--auth0-*` flags
+keeps the plain room-token behavior, so offline demos and tests work unchanged.
+
 ### Demo beats
 
 1. Alice asks from Codex: `Ask Bob through Lineage why src/auth.ts:42 was implemented this way.`

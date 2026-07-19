@@ -129,7 +129,7 @@ export class WebSocketLineageTransport implements LineageTransport {
 
   private buildEnvelope(
     partial:
-      | { type: "hello"; payload: { roomToken: string } }
+      | { type: "hello"; payload: { roomToken: string; accessToken?: string } }
       | {
           type: "question.ask";
           recipient: string;
@@ -169,7 +169,10 @@ export class WebSocketLineageTransport implements LineageTransport {
     });
     const hello = this.buildEnvelope({
       type: "hello",
-      payload: { roomToken: config.roomToken },
+      payload: {
+        roomToken: config.roomToken,
+        ...(config.accessToken ? { accessToken: config.accessToken } : {}),
+      },
     });
     await this.sendWithAck(hello);
     this.everConnected = true;

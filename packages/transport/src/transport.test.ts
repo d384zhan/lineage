@@ -5,7 +5,7 @@ import {
   type ConnectionConfig,
   type WireEnvelope,
 } from "@lineage/contracts";
-import { startRelay, type RelayHandle } from "@lineage/relay";
+import { createFakeIssuer, startRelay, type RelayHandle } from "@lineage/relay";
 import { TransportError } from "./errors";
 import { WebSocketLineageTransport, type TransportOptions } from "./ws-transport";
 
@@ -196,6 +196,35 @@ describe("WebSocketLineageTransport", () => {
     });
     const message = await seen;
     expect(message.type).toBe("intent.announce");
+  });
+
+  test("connects with an access token when the relay requires Auth0", async () => {
+    const audience = "https://lineage.example/api";
+    const issuer = await createFakeIssuer({ audience });
+    relay = startRelay({
+      port: 0,
+      token: TOKEN,
+      auth: { issuer: issuer.issuer, audience, jwks: issuer.jwks },
+    });
+    const accessToken = await issuer.sign({ sub: "auth0|1", email: "alice@example.com" });
+    const alice = await connected(
+      { userId: "alice@example.com", provider: "claude" },
+      {},
+      { accessToken },
+    );
+    const ack = await alice.publish(
+      presenceEnvelope({ userId: "alice@example.com", provider: "claude" }),
+    );
+    expect(ack.delivered).toBeTrue();
+
+    // Without a token the same relay refuses the hello.
+    const anonymous = new WebSocketLineageTransport({ ackTimeoutMs: 1_000 });
+    transports.push(anonymous);
+    const error = await anonymous
+      .connect(config({ userId: "alice@example.com", provider: "claude" }))
+      .then(() => undefined)
+      .catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
   });
 
   test("reconnects after a relay restart and keeps working", async () => {
