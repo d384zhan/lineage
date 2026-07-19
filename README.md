@@ -1,101 +1,319 @@
 # Lineage
 
-Git-native decision history and live coordination for coding agents.
+Git blame tells you who changed a line. Lineage tells your coding agent why.
 
-Git tracks what changed; Lineage records why — the intents, assumptions, and
-decisions behind each change — and lets developers (and their Claude/Codex
-agents) ask each other questions across machines, with human approval.
+Lineage connects Claude Code and Codex sessions so developers can recover the
+prompt, intent, assumptions, and chronology behind a change. A teammate can ask
+your agent why code exists, send context into another session, or check what you
+are working on without leaving the terminal.
 
-This repository is a Bun workspace containing both halves:
+## What Lineage does
 
-- **History** (Person 1): contracts, decision/intent records, conflict
-  detection, Git refs + notes persistence, and private prompt provenance.
-- **Network** (Person 2): WebSocket relay, transport, local daemon with the
-  approve/answer flow, MCP server for Claude Code and Codex, and the
-  `host`/`tunnel`/`join`/`daemon`/`run`/`ask`/`reply`/`inbox` commands.
+- **Explains code with provenance.** Lineage combines Git blame, structured
+  decision records, and the author's private Claude or Codex history to recover
+  the likely originating prompt.
+- **Connects coding agents.** Questions, action requests, and one-way context
+  travel between developers and agent harnesses through a repository-scoped
+  relay.
+- **Keeps humans in control.** A teammate cannot access local prompt history or
+  agent context until the recipient approves the request.
+- **Preserves decisions in Git.** Intent and decision summaries live in Git refs
+  and notes without adding files or noise to the worktree.
+- **Catches coordination conflicts.** Concurrent intents can surface
+  incompatible assumptions before both developers commit.
 
-## Development
+Lineage is CLI-first. There is no dashboard and no required cloud database.
+
+## Harness support
+
+| Capability | Claude Code | Codex |
+| --- | --- | --- |
+| MCP tools | Yes | Yes |
+| Read local native session history | Yes | Yes |
+| Send questions or context | Yes | Yes |
+| Live incoming-session wake-up | Yes, through Claude Channels | No native channel API |
+| Retrieve completed answers | Automatic wake-up | `lineage_requests` |
+
+Claude Code 2.1.80 or newer is recommended for channel notifications.
+
+## Install
+
+Requirements:
+
+- [Bun](https://bun.sh)
+- Git
+- Claude Code and/or Codex
+
+Install Lineage from source:
 
 ```bash
+git clone https://github.com/d384zhan/lineage.git
+cd lineage
 bun install
-bun link        # exposes the `lineage` executable (used by the Git hook)
-bun test
-bun run typecheck
+bun link
+lineage --help
 ```
 
-## Workspace ownership
-
-- `packages/contracts`: shared, versioned schemas and interfaces (see CONTRACTS.md)
-- `packages/core`: decision, intent, and conflict behavior
-- `packages/git-store`: per-user intent refs and Git notes persistence
-- `packages/prompt-index`: machine-wide Claude/Codex metadata index and exact source lookup
-- `packages/commands-history`: history command implementations
-- `packages/relay`: Bun WebSocket relay (rooms per repoId, token auth, routing, acks)
-- `packages/transport`: `WebSocketLineageTransport` client with ask/answer correlation and reconnect
-- `packages/daemon`: local hub for the relay connection, durable inbox, approvals, and localhost HTTP API
-- `packages/mcp`: stdio MCP server exposing the `lineage_*` tools and Claude Channel wake-ups
-- `packages/commands-network`: network commands and the `lineage run` agent wrapper
-- `packages/cli`: CLI dispatcher registering both command sets
-
-## Two-laptop demo runbook
-
-One-time on each laptop: install [Bun](https://bun.sh), Git, and the agent CLI
-(`claude` 2.1.80+ and/or `codex`), then `bun install && bun link` in this repo.
-
-In the repository where you want to use Lineage, run `lineage init` once on
-each computer. It derives the same room identity from the Git `origin`, stores
-everything under `.git/lineage/`, registers installed Claude/Codex MCP clients,
-and indexes existing sessions. It does not change the worktree or require a
-commit. Rerun it after installing another agent CLI.
-
-### Laptop A (hosts the relay, runs Codex)
+Run this once in every repository checkout that will use Lineage:
 
 ```bash
-lineage init                       # local setup; no files to commit
-lineage host --port 8787           # terminal 1; creates or reuses this repo's room token
-lineage join --relay ws://localhost:8787 --token <token> --user alice --provider codex
-lineage run codex                  # terminal 2 — starts messaging invisibly
-```
-
-### Laptop B (Windows, clones the repo, runs Claude)
-
-```bash
-# clone the same Git repository; its origin produces the same Lineage room id
+cd /path/to/your-project
 lineage init
-lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider claude
-lineage run claude                  # requests and answers interrupt Claude
 ```
 
-For computers on different networks, laptop A can run
-`lineage tunnel --port 8787` and laptop B can use the printed `wss://` URL.
+`lineage init` derives a shared repository identity from the Git origin,
+registers the installed Claude and Codex MCP servers, installs the post-commit hook,
+and indexes existing local agent sessions. All local state stays under
+`.git/lineage/`; the worktree remains unchanged.
 
-## Auth0 identity (optional)
+## Quick start on the same network
 
-By default the relay trusts self-declared userIds gated by the shared room
-token. With Auth0 enabled, `lineage login` proves who you are in the browser
-once per computer (OAuth Device Authorization Flow), the daemon connects with
-that JWT, and the relay verifies it against the tenant's JWKS — a joiner cannot claim
-someone else's name, and every answer is tied to a verified identity.
+### 1. Sign in once
 
-### One-time tenant setup
+Auth0 is recommended because it binds every message to a verified identity.
+Everyone signs in once per computer:
 
-1. Create a free tenant at [auth0.com](https://auth0.com) and note its domain,
-   e.g. `dev-xyz.us.auth0.com`.
-2. **Applications → Create Application → Native.** In its settings, under
-   *Advanced Settings → Grant Types*, enable **Device Code** (and keep
-   *Refresh Token*). Note the Client ID.
-3. **Applications → APIs → Create API.** Any identifier works, e.g.
-   `https://lineage/api` — this is the *audience*, matched byte-for-byte, and
-   it cannot be edited after creation, so beware trailing spaces when pasting.
-   Under the API's settings, enable **Allow Offline Access** so logins get
-   refresh tokens.
-4. On that API's **Application Access** tab (older dashboards call it
-   *Machine To Machine Applications*), find your Native app and **Grant
-   access** with **user-delegated** access. Without this, `lineage login`
-   fails with "Client is not authorized to access resource server".
-5. (Recommended) **Actions → Triggers → post-login**: add an Action that copies
-   the login email into the access token, so userIds are emails instead of
-   opaque `auth0|...` subject ids:
+```bash
+lineage login \
+  --domain dev-example.us.auth0.com \
+  --client-id <native-app-client-id> \
+  --audience https://lineage/api
+```
+
+The login is stored at `~/.lineage/auth.json` and refreshes automatically.
+See [Auth0 setup](#auth0-setup) if the tenant has not been configured yet.
+
+### 2. Start the relay
+
+On the host computer, from the project repository:
+
+```bash
+lineage host --port 8787
+```
+
+The terminal prints the LAN join command. Leave it running. The first time a
+verified teammate connects, the host approves or rejects that identity.
+
+### 3. Join from each computer
+
+The host joins through localhost:
+
+```bash
+lineage join --relay ws://localhost:8787
+lineage run claude
+```
+
+Other teammates use the host's LAN address:
+
+```bash
+lineage join --relay ws://<host-ip>:8787
+lineage run claude
+```
+
+`lineage join` is normally needed once per repository checkout. Later sessions
+only need:
+
+```bash
+lineage run claude
+# or
+lineage run codex
+```
+
+The first `lineage run` process owns the repository daemon, so keep that session
+open while other sessions use it.
+
+### Token-only local mode
+
+For a fast demo without Auth0:
+
+```bash
+# Host
+lineage host --no-auth0 --port 8787
+
+# Each participant uses the token printed by the host
+lineage join --relay ws://<host-ip>:8787 --token <room-token> --user <name>
+lineage run claude
+```
+
+This mode verifies possession of the shared token, not personal identity.
+
+## Use Lineage from your agent
+
+Once the agent is launched through `lineage run`, ask naturally. The MCP tools
+carry structured objects between agents, so no frontend or shared chat window is
+required.
+
+### Ask why code exists
+
+```text
+Ask Lorena through Lineage why src/cart.ts:42 reserves inventory before checkout.
+Return the exact originating prompt if her local history can match it.
+```
+
+Lineage traces the line to a commit, routes the question to Lorena, and asks her
+whether to dispatch her agent, answer manually, or reject. If approved, her
+agent receives local Git authorship, decision history, prompt provenance, and
+configured prompt-hook context. The response returns as a structured object.
+
+Recipients can be addressed by full Auth0 identity, email prefix, or a unique
+Git-name token. Ambiguous names return candidate identities instead of guessing.
+
+### Send one-way context
+
+```text
+Tell Lorena's agent through Lineage that I am adding reservation expiry next,
+so its cart schema should leave room for an expiry timestamp. Send this as context.
+```
+
+Context does not create a reply obligation. Context from another user still
+requires recipient approval.
+
+### Connect two sessions on one computer
+
+Start Claude twice from the same checkout:
+
+```bash
+# Terminal 1
+lineage run claude
+
+# Terminal 2
+lineage run claude
+```
+
+Tell either session to send context through Lineage to your own identity. Each
+terminal has a distinct session ID, so the message is injected into the other
+session and not echoed back to its sender. Same-user context is accepted
+automatically.
+
+### Announce current work
+
+Agents can announce structured implementation intent before editing. The CLI
+equivalent is:
+
+```bash
+lineage announce \
+  --summary "Add cart inventory reservations" \
+  --file src/cart.ts \
+  --assume inventory.storage=in-memory
+```
+
+If another live intent carries a conflicting value for the same assumption,
+Lineage warns both developers before the changes silently diverge.
+
+## Decision history
+
+Lineage stores current intent in per-user Git refs and attaches approved
+decision summaries to commits with Git notes.
+
+```bash
+# Explain a file, symbol, text query, or exact line
+lineage why src/cart.ts
+lineage why src/cart.ts:42
+
+# Show the chronology for a file or symbol
+lineage timeline src/cart.ts
+lineage timeline --symbol reserveInventory
+
+# Link additional reasoning to the latest commit
+lineage link-commit \
+  --commit HEAD \
+  --rationale "Reserve early to prevent overselling" \
+  --alternative "Reserve during checkout"
+
+# Exchange Lineage refs and notes through the Git remote
+lineage sync --mode both
+```
+
+Normal source commits remain unchanged. `lineage sync` transfers only Lineage
+refs and notes.
+
+## How it works
+
+```text
+Claude Code / Codex
+        │ MCP
+        ▼
+local Lineage daemon ─── private prompt index + Git history
+        │ WebSocket
+        ▼
+repository relay
+        │
+        ▼
+teammate daemon ─── approval ─── teammate agent
+```
+
+- The **MCP server** exposes history, coordination, approval, and reply tools.
+- The **local daemon** owns one relay connection, durable inbox/outbox state,
+  prompt matching, Git authorship checks, and local hook execution.
+- The **relay** verifies room membership and routes live structured messages. It
+  does not run an LLM or store conversation history.
+- The **Git store** keeps durable, shareable decision summaries separate from
+  source branches.
+- The **prompt index** stores metadata and pointers into native local session
+  files, not copied prompt text.
+
+## Privacy and security
+
+- Raw prompts remain in Claude Code or Codex's native local session files.
+- `~/.lineage/prompt-index.json` contains hashes, timestamps, touched files,
+  and source pointers, but not raw prompt text.
+- Exact prompt text is reread only after the recipient approves a request. It is
+  returned transiently and is never written to Git notes or the Lineage index.
+- User prompt-hook context and repository authorship summaries remain in daemon
+  memory and are not persisted to Git or the relay.
+- Auth0 verifies identity. The host separately approves repository membership.
+- Host approvals live in `.git/lineage/members.json` with owner-only
+  permissions. Revocation blocks the identity's next connection but does not
+  terminate an already-connected socket.
+- Room credentials, relay settings, inboxes, and outboxes stay under
+  `.git/lineage/` and are not committed.
+
+Inspect or revoke approved members with:
+
+```bash
+lineage members list
+lineage members revoke lorena@example.com
+```
+
+## Different networks
+
+Lineage includes an optional Cloudflare Quick Tunnel wrapper:
+
+```bash
+# Keep lineage host running, then expose its port
+lineage tunnel --port 8787
+```
+
+Joiners use the printed `wss://` URL. Quick Tunnels do not require an API key,
+but they are intended for temporary demos rather than production hosting.
+
+## Current limitations
+
+- The relay is live-only. An offline recipient produces an explicit error rather
+  than receiving a queued message later.
+- Claude Channels are a research-preview API. Launching Claude normally still
+  exposes pull-based MCP tools but cannot guarantee live wake-ups.
+- Codex has no equivalent channel API, so incoming and completed messages are
+  retrieved through MCP rather than injected as live interrupts.
+- With more than two same-user Claude sessions, the first eligible session to
+  poll receives one-way context.
+- The first `lineage run` session owns the shared daemon. Closing it disconnects
+  other sessions until one starts Lineage again.
+- The relay and local stores are an MVP, not production multi-tenant
+  infrastructure.
+
+## Auth0 setup
+
+Lineage uses OAuth Device Authorization Flow so terminal users can authenticate
+in a browser without pasting passwords into the CLI.
+
+1. Create a free Auth0 tenant and note its domain.
+2. Create a **Native** application. Under **Advanced Settings → Grant Types**,
+   enable **Device Code** and **Refresh Token**.
+3. Create an Auth0 API. Use an identifier such as `https://lineage/api` and
+   enable **Allow Offline Access**.
+4. Grant the Native application user-delegated access to the API.
+5. Add a post-login Action that copies the user's email into the access token:
 
    ```js
    exports.onExecutePostLogin = async (event, api) => {
@@ -105,122 +323,56 @@ someone else's name, and every answer is tied to a verified identity.
    };
    ```
 
-### Using it
+The domain, client ID, and audience can also be supplied through
+`LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`, and
+`LINEAGE_AUTH0_AUDIENCE`.
 
-```bash
-# Each teammate signs into Lineage once on their computer:
-lineage login --domain dev-xyz.us.auth0.com --client-id <client-id> --audience "https://lineage/api"
+## CLI reference
 
-# The host automatically uses that saved Auth0 tenant:
-lineage host --port 8787
-
-# Each teammate pastes the token-free command once; their verified userId is inferred:
-lineage join --relay ws://<host>:8787
-lineage run claude
+```text
+lineage init           Initialize MCP, Git metadata, and the private prompt index
+lineage run            Launch Claude or Codex with Lineage messaging
+lineage host           Start a repository relay
+lineage join           Save relay and identity settings for a repository
+lineage login          Authenticate this computer through Auth0
+lineage logout         Remove the machine-wide Auth0 login
+lineage members        List or revoke approved repository members
+lineage ask            Send a question, action request, or one-way context
+lineage inbox          List received messages and their status
+lineage reply          Answer an inbound request by ID
+lineage announce       Publish current implementation intent
+lineage complete       Complete or cancel an intent
+lineage link-commit    Attach structured reasoning to a commit
+lineage why            Explain a file, symbol, text query, or exact line
+lineage timeline       Show decision chronology
+lineage sync           Push or fetch Lineage Git refs and notes
+lineage index          Refresh the private Claude and Codex history index
+lineage identity       Inspect or add Git identities
+lineage tunnel         Expose a relay through a Cloudflare Quick Tunnel
 ```
 
-The first time a verified teammate connects, the host terminal asks whether to
-approve them. Approval is stored in `.git/lineage/members.json`; later sessions
-reconnect without another prompt. Hosts can inspect or revoke access with:
+Every command supports `--json` for structured output.
+
+## Development
 
 ```bash
-lineage members list
-lineage members revoke lorena@example.com
+bun install
+bun run typecheck
+bun test
 ```
 
-Revocation takes effect on that identity's next connection. It does not
-terminate an already-connected session.
+Workspace packages:
 
-The flags can also come from `LINEAGE_AUTH0_DOMAIN`, `LINEAGE_AUTH0_CLIENT_ID`,
-and `LINEAGE_AUTH0_AUDIENCE`. `lineage login` prints your verified identity.
-The daemon uses it as your userId, so teammates `lineage ask <that-identity>`.
-Login is stored at `~/.lineage/auth.json` with owner-only permissions and
-refreshes automatically. `lineage logout` removes it for the whole computer.
-Use `lineage host --no-auth0` to deliberately run a room-token-only relay.
-Authenticated host rooms use the verified identity plus host approval instead
-of a shared room token.
+- `packages/contracts`: shared schemas and provider-neutral runtime contracts
+- `packages/core`: intent, decision, and conflict behavior
+- `packages/git-store`: Git refs and notes persistence
+- `packages/prompt-index`: private Claude and Codex provenance index
+- `packages/commands-history`: history commands
+- `packages/relay`: WebSocket rooms, authentication, aliases, and routing
+- `packages/transport`: reconnecting WebSocket client and request correlation
+- `packages/daemon`: local state, approvals, prompt hooks, and HTTP API
+- `packages/mcp`: MCP tools and Claude Channel notifications
+- `packages/commands-network`: setup, identity, relay, and agent-wrapper commands
+- `packages/cli`: CLI entrypoint
 
-The first `lineage host` creates `.git/lineage/host.json`; later starts reuse
-the same port. A teammate only runs the printed `lineage join` command once
-because their relay URL and approved identity are remembered.
-If the host's LAN IP changes, rerun `lineage join --relay ws://<new-ip>:<port>`;
-the saved connection settings and user identity fill in automatically.
-
-Questions may address an online teammate by full Auth0 identity, email prefix,
-or a unique Git-name token. For example, `dawang` resolves to
-`dawang.zhang24@gmail.com` when Dawang is the only online match. Ambiguous
-aliases return the matching identities and require clarification.
-
-The same `lineage_ask` tool also carries one-way session context with
-`kind: "context"`. The recipient accepts or rejects it; acceptance injects the
-context into that agent session without requiring a reply. Context from another
-user still requires approval. Two Claude terminals on one computer work with
-the same login and daemon: `lineage run claude` gives each terminal a session
-ID, routes the event to the other session, and accepts same-user context
-automatically. Keep the first Lineage-run session open because it owns the
-shared daemon for that repository.
-
-### Demo beats
-
-1. Alice asks from Codex: `Ask Bob through Lineage why src/auth.ts:42 was implemented this way.`
-2. Lineage returns a request ID immediately, then runs Git blame and routes the
-   structured question only to Bob in the background.
-3. Bob's active Claude session wakes and asks whether to dispatch Claude,
-   answer manually, or reject.
-4. On dispatch, Lineage privately matches Bob's native session history and
-   runs Bob's configured `UserPromptSubmit` context hooks against the question.
-   Claude receives the approved local context and returns a cited answer. Alice
-   checks `lineage_requests` without having blocked her Codex session.
-5. Alice commits; the post-commit hook links the session
-   (`lineage link-commit`), storing the decision in Git notes.
-6. Alice disconnects. `lineage why src/auth/...` on Laptop B still reconstructs
-   the decision from Git.
-
-## Notes and limitations (MVP)
-
-- Room secrets, relay URLs, and daemon state live under `.git/lineage/` and are
-  never committed. Git notes carry only approved structured decisions.
-- `lineage join` automatically reads the repository's effective Git name/email.
-  Every later session reads it again, so normal setup needs no identity command.
-  Add historical aliases with repeated
-  `--git-identity "Name <email>"` flags. Existing joins are upgraded at daemon
-  startup from `git config`, so rejoining is not required.
-  Use `lineage identity add "Name <email>"` for historical aliases and
-  `lineage identity list` to inspect the mapping.
-- Approved dispatches compute a memory-only authorship summary from up to 500
-  commits across local refs, including whether referenced commits belong to the
-  recipient. Agents are told to use that evidence instead of treating all code
-  in a shared repository as the recipient's work. Authorship context is not
-  stored in the inbox, Git notes, or the relay.
-- Repository identity is a stable hash of the normalized Git `origin`, so SSH
-  and HTTPS clones meet in the same room without a committed Lineage file. A
-  repository without an origin falls back to its first commit; an empty local
-  repository can use `lineage init --repo-id <shared-id>`.
-- `~/.lineage/prompt-index.json` is private to one machine. It stores hashes,
-  timestamps, touched files, and pointers into native agent JSONL files, not
-  prompt text. Exact prompts are reread only after approval and are never sent
-  to Git or the relay outside that answer.
-- The local inbox persists under `.git/lineage/`. Matched exact prompts remain
-  memory-only; a restarted dispatch returns to pending and requires approval again.
-- Active-session dispatches run the recipient's unconditional command-based
-  `UserPromptSubmit` hooks from Claude or Codex config. Plain Claude output and
-  Codex `additionalContext` output are normalized into the same agent request.
-  Standalone headless agents use their native hook lifecycle instead. Hook
-  context remains memory-only and never enters Git, the inbox file, or the relay.
-- Both Claude Code and Codex native session logs are indexed. `lineage run`
-  refreshes the index after the agent exits; `lineage index` imports existing
-  history, including sessions created before Lineage was installed.
-- The MCP instructions tell agents to ground why/how/design questions in the
-  narrowest relevant `path:line`. Broad status and coordination questions remain
-  valid, but cannot select an exact originating prompt without a code anchor.
-- Use `lineage run claude|codex` for live messaging. It owns the daemon for the
-  life of the coding-agent session, so no separate daemon terminal is needed.
-  Launching normally still exposes pull-based MCP tools but cannot guarantee wake-ups.
-- Claude wake-ups use Claude Code Channels, currently a research-preview API.
-  They are enabled by default for `lineage run claude`: new requests and
-  completed answers interrupt the active session without blocking the sender.
-  Use `--no-lineage-channel` to opt out. Codex has no equivalent Lineage
-  Channel, so it checks completed answers through `lineage_requests`.
-- The relay remains intentionally live-only for this MVP. Once the recipient's
-  daemon accepts a question, its per-user inbox is durable; a fully offline
-  recipient is reported to the asker instead of silently holding a request.
+See [CONTRACTS.md](./CONTRACTS.md) for protocol and persistence contracts.
