@@ -12,6 +12,7 @@ import type { ApprovalIo } from "./approval";
 import type { AgentAnswerer } from "./agent-answerer";
 import type { RefreshIndexOptions } from "@lineage/prompt-index";
 import { DAEMON_SECRET_HEADER } from "./http";
+import { writeDaemonInfo } from "./files";
 
 const TOKEN = "room-secret";
 
@@ -417,5 +418,30 @@ describe("daemon", () => {
     const status = await withSecret.json() as { connected: boolean; relayUrl: string };
     expect(status.connected).toBeTrue();
     expect(status.relayUrl).toBe(relay.url);
+  });
+
+  test("daemon discovery times out when stale state points at a hung port", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "lineage-stale-daemon-"));
+    tempDirs.push(stateDir);
+    const hung = Bun.serve({
+      port: 0,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+    try {
+      await writeDaemonInfo(stateDir, {
+        port: hung.port!,
+        pid: 1234,
+        secret: "stale-secret",
+        startedAt: new Date().toISOString(),
+      });
+      const startedAt = Date.now();
+      const error = await DaemonClient.open(stateDir, stateDir, 50)
+        .then(() => undefined)
+        .catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(Error);
+      expect(Date.now() - startedAt).toBeLessThan(500);
+    } finally {
+      hung.stop(true);
+    }
   });
 });

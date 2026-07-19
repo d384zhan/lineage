@@ -38,7 +38,11 @@ export class DaemonClient {
   constructor(private readonly info: DaemonInfo) {}
 
   /** Connects to the daemon recorded in `.git/lineage/daemon.json`. */
-  static async open(cwd: string, stateDirOverride?: string): Promise<DaemonClient> {
+  static async open(
+    cwd: string,
+    stateDirOverride?: string,
+    probeTimeoutMs = 1_500,
+  ): Promise<DaemonClient> {
     const stateDir = resolveStateDir(cwd, stateDirOverride);
     const info = await readDaemonInfo(stateDir);
     if (!info) {
@@ -48,7 +52,7 @@ export class DaemonClient {
     }
     const client = new DaemonClient(info);
     try {
-      await client.status();
+      await client.status(probeTimeoutMs);
     } catch {
       throw new Error(
         "The lineage daemon is not responding. Start `lineage daemon` in another terminal.",
@@ -66,8 +70,8 @@ export class DaemonClient {
     });
   }
 
-  async status(): Promise<DaemonStatus> {
-    return (await this.request("GET", "/status")) as DaemonStatus;
+  async status(timeoutMs?: number): Promise<DaemonStatus> {
+    return (await this.request("GET", "/status", undefined, timeoutMs)) as DaemonStatus;
   }
 
   async ask(input: AskInput): Promise<AgentAnswer> {
@@ -103,9 +107,15 @@ export class DaemonClient {
     await this.request("POST", "/publish-intent", intent);
   }
 
-  private async request(method: string, path: string, body?: unknown): Promise<unknown> {
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    timeoutMs?: number,
+  ): Promise<unknown> {
     const response = await fetch(`http://127.0.0.1:${this.info.port}${path}`, {
       method,
+      ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       headers: {
         [DAEMON_SECRET_HEADER]: this.info.secret,
         ...(body !== undefined ? { "content-type": "application/json" } : {}),

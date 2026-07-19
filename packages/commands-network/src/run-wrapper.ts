@@ -60,6 +60,7 @@ async function defaultSpawn(
 
 export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult> {
   const print = options.print ?? ((line: string) => console.log(line));
+  print("Preparing Lineage...");
   const repoRoot = findRepoRoot(options.cwd);
   if (!repoRoot) throw new Error(`Not inside a Git repository: ${options.cwd}`);
   await readRepoId(options.cwd);
