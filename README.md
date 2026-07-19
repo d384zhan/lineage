@@ -85,9 +85,15 @@ someone else's name, and every answer is tied to a verified identity.
    *Advanced Settings → Grant Types*, enable **Device Code** (and keep
    *Refresh Token*). Note the Client ID.
 3. **Applications → APIs → Create API.** Any identifier works, e.g.
-   `https://lineage/api` — this is the *audience*. Under the API's settings,
-   enable **Allow Offline Access** so logins get refresh tokens.
-4. (Recommended) **Actions → Triggers → post-login**: add an Action that copies
+   `https://lineage/api` — this is the *audience*, matched byte-for-byte, and
+   it cannot be edited after creation, so beware trailing spaces when pasting.
+   Under the API's settings, enable **Allow Offline Access** so logins get
+   refresh tokens.
+4. On that API's **Application Access** tab (older dashboards call it
+   *Machine To Machine Applications*), find your Native app and **Grant
+   access** with **user-delegated** access. Without this, `lineage login`
+   fails with "Client is not authorized to access resource server".
+5. (Recommended) **Actions → Triggers → post-login**: add an Action that copies
    the login email into the access token, so userIds are emails instead of
    opaque `auth0|...` subject ids:
 
