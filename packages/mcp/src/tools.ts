@@ -78,6 +78,10 @@ const AskArgsSchema = z.object({
   message: "Provide text or an exact code line",
 });
 
+const RequestsArgsSchema = z.object({
+  requestId: z.string().min(1).optional(),
+});
+
 const WhyArgsSchema = z
   .object({
     path: z.string().optional(),
@@ -167,7 +171,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: MCP_TOOL_NAMES.ask,
     description:
-      "Ask another developer's agent a question about this repo (e.g. why something was built a certain way, or what they are working on). The recipient approves before any answer is produced; this can take a minute.",
+      "Queue a question for another developer's agent and return immediately with a requestId. The recipient approves before answering. Check lineage_requests later for the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -177,6 +181,17 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         evidence: evidenceJsonSchema,
       },
       required: ["recipient"],
+    },
+  },
+  {
+    name: MCP_TOOL_NAMES.requests,
+    description:
+      "Check pending and completed questions sent to teammates. Pass a requestId for one result or omit it to list all outgoing requests.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", description: "Optional requestId returned by lineage_ask." },
+      },
     },
   },
   {
@@ -343,12 +358,21 @@ export function createTools(options: ToolsOptions) {
           );
         }
         const daemon = await openDaemon();
-        const answer = await daemon.ask({
+        const queued = await daemon.askAsync({
           recipient: input.recipient,
           text: input.text ?? `Why was ${input.line} implemented this way? Return the originating exact prompt if your local history can match it.`,
           evidence,
         });
-        return textResult(answer);
+        return textResult(queued);
+      }
+      case MCP_TOOL_NAMES.requests: {
+        const input = RequestsArgsSchema.parse(args);
+        const daemon = await openDaemon();
+        const entries = await daemon.requests();
+        if (!input.requestId) return textResult({ entries });
+        const entry = entries.find((candidate) => candidate.requestId === input.requestId);
+        if (!entry) throw new Error(`Unknown outgoing requestId: ${input.requestId}`);
+        return textResult(entry);
       }
       case MCP_TOOL_NAMES.recordDecision: {
         const input = RecordDecisionArgsSchema.parse(args);

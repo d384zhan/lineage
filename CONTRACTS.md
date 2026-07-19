@@ -102,6 +102,7 @@ The fixed MCP tool names are exported as `MCP_TOOL_NAMES`:
 - `lineage_announce`
 - `lineage_record_decision`
 - `lineage_ask`
+- `lineage_requests`
 - `lineage_reply`
 - `lineage_why`
 - `lineage_timeline`

@@ -36,6 +36,7 @@ export type DaemonInfo = z.infer<typeof DaemonInfoSchema>;
 const NETWORK_FILE = "network.json";
 const DAEMON_FILE = "daemon.json";
 export const INBOX_FILE = "inbox.json";
+export const OUTBOX_FILE = "outbox.json";
 
 export function findGitDir(cwd: string): string | undefined {
   let current = cwd;

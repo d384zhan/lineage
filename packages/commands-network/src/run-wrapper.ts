@@ -1,5 +1,6 @@
 import {
   LINEAGE_PROVIDER_ENV,
+  LINEAGE_CHANNEL_ENV,
   LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   type Provider,
@@ -21,6 +22,7 @@ export interface RunAgentOptions {
   provider: Provider;
   extraArgs?: string[];
   userId?: string;
+  channel?: boolean;
   print?: (line: string) => void;
   /** Test seam: full command to spawn instead of the real agent CLI. */
   agentCommand?: string[];
@@ -68,6 +70,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const extraArgs = options.extraArgs ?? [];
   const channelArgs =
     options.provider === "claude" &&
+    options.channel === true &&
     !extraArgs.includes("--dangerously-load-development-channels")
       ? ["--dangerously-load-development-channels", "server:lineage"]
       : [];
@@ -114,6 +117,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         [LINEAGE_SESSION_ID_ENV]: sessionId,
         [LINEAGE_USER_ID_ENV]: userId,
         [LINEAGE_PROVIDER_ENV]: options.provider,
+        ...(options.channel ? { [LINEAGE_CHANNEL_ENV]: "1" } : {}),
       },
       options.cwd,
     );

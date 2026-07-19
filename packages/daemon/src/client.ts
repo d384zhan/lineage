@@ -12,6 +12,7 @@ import { z } from "zod";
 import { readDaemonInfo, resolveStateDir, type DaemonInfo } from "./files";
 import { DAEMON_SECRET_HEADER } from "./http";
 import type { InboxEntry } from "./inbox";
+import type { OutboxEntry } from "./outbox";
 
 const ErrorBodySchema = z.object({
   error: z.object({
@@ -69,6 +70,18 @@ export class DaemonClient {
 
   async ask(input: AskInput): Promise<AgentAnswer> {
     return AgentAnswerSchema.parse(await this.request("POST", "/ask", input));
+  }
+
+  async askAsync(input: AskInput): Promise<{ requestId: string; status: "pending" }> {
+    return (await this.request("POST", "/ask-async", input)) as {
+      requestId: string;
+      status: "pending";
+    };
+  }
+
+  async requests(): Promise<OutboxEntry[]> {
+    const body = (await this.request("GET", "/requests")) as { entries: OutboxEntry[] };
+    return body.entries;
   }
 
   async reply(input: ReplyInput & { mode?: "agent" | "manual" | "history" }): Promise<void> {

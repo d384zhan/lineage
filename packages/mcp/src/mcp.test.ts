@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   LINEAGE_PROVIDER_ENV,
+  LINEAGE_CHANNEL_ENV,
   LINEAGE_SESSION_ID_ENV,
   LINEAGE_USER_ID_ENV,
   MCP_TOOL_NAMES,
@@ -198,7 +199,50 @@ describe("mcp server", () => {
     expect(answer.requestId).toBe(requestId);
   });
 
-  test("pushes a pending question into Claude and handles it in the active session", async () => {
+  test("lineage_ask returns immediately and lineage_requests receives the later answer", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const aliceRepo = await makeTempRepo();
+    const bobRepo = await makeTempRepo();
+    const alice = await startDaemon({
+      cwd: aliceRepo,
+      io: new ScriptedIo(),
+      stateDir: join(aliceRepo, ".git", "lineage"),
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "codex" },
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+    });
+    daemons.push(alice);
+    const bob = await startDaemon({
+      cwd: bobRepo,
+      io: new ScriptedIo(["m", "Because reservations prevent overselling."]),
+      stateDir: join(bobRepo, ".git", "lineage"),
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "bob", provider: "claude" },
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+    });
+    daemons.push(bob);
+
+    const activeCodex = await makeClient(aliceRepo, {
+      [LINEAGE_USER_ID_ENV]: "alice",
+      [LINEAGE_PROVIDER_ENV]: "codex",
+    });
+    const queued = await activeCodex.callTool(MCP_TOOL_NAMES.ask, {
+      recipient: "bob",
+      text: "Why reserve inventory before checkout?",
+    });
+    const request = JSON.parse(queued.text) as { requestId: string; status: string };
+    expect(request.status).toBe("pending");
+
+    await until(() => alice.outbox.get(request.requestId)?.status === "answered");
+    const completed = await activeCodex.callTool(MCP_TOOL_NAMES.requests, {
+      requestId: request.requestId,
+    });
+    const result = JSON.parse(completed.text) as { status: string; answer: { text: string } };
+    expect(result.status).toBe("answered");
+    expect(result.answer.text).toBe("Because reservations prevent overselling.");
+  });
+
+  test("optionally queues a compact pending question in an active Claude session", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();
     const bob = await startDaemon({
@@ -228,6 +272,7 @@ describe("mcp server", () => {
     const activeClaude = await makeClient(repo, {
       [LINEAGE_USER_ID_ENV]: "bob",
       [LINEAGE_PROVIDER_ENV]: "claude",
+      [LINEAGE_CHANNEL_ENV]: "1",
     });
     const asking = DaemonClient.forPort(alice.port, alice.secret).ask({
       recipient: "bob",

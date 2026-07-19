@@ -78,9 +78,9 @@ export class WebSocketLineageTransport implements LineageTransport {
     return await this.sendWithAck(envelope);
   }
 
-  async ask(input: AskInput): Promise<AgentAnswer> {
+  async ask(input: AskInput, suppliedRequestId?: string): Promise<AgentAnswer> {
     const parsed = AskInputSchema.parse(input);
-    const requestId = crypto.randomUUID();
+    const requestId = suppliedRequestId ?? crypto.randomUUID();
     const answer = deferred<AgentAnswer>();
     const timer = setTimeout(() => {
       this.pendingAsks.delete(requestId);

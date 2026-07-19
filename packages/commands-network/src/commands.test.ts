@@ -286,6 +286,7 @@ describe("run wrapper", () => {
         "  session: process.env.LINEAGE_SESSION_ID,",
         "  user: process.env.LINEAGE_USER_ID,",
         "  provider: process.env.LINEAGE_PROVIDER,",
+        "  channel: process.env.LINEAGE_CHANNEL,",
         "}));",
       ].join("\n"),
     );
@@ -294,6 +295,7 @@ describe("run wrapper", () => {
       cwd: repo,
       provider: "claude",
       userId: "alice",
+      channel: true,
       print: () => {},
       agentCommand: ["bun", agentScript, outFile, claudeRoot],
       indexOptions: { indexPath, claudeRoot, codexRoot },
@@ -304,6 +306,7 @@ describe("run wrapper", () => {
     expect(agentEnv.session).toBe(result.sessionId);
     expect(agentEnv.user).toBe("alice");
     expect(agentEnv.provider).toBe("claude");
+    expect(agentEnv.channel).toBe("1");
 
     const index = await loadPromptIndex(indexPath);
     expect(index.entries).toHaveLength(1);

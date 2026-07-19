@@ -4,6 +4,8 @@ export { DaemonClient } from "./client";
 export type { DaemonStatus, InboxSnapshotEntry } from "./client";
 export { Inbox } from "./inbox";
 export type { InboxEntry, InboxStatus } from "./inbox";
+export { Outbox } from "./outbox";
+export type { OutboxEntry, OutboxStatus } from "./outbox";
 export { ApprovalQueue, toInboundRequest } from "./approval";
 export type { ApprovalIo, ApprovalOutcome } from "./approval";
 export { createSubAgentAnswerer, resolveExecutable } from "./agent-answerer";

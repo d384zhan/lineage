@@ -237,11 +237,16 @@ export const daemonCommand: LineageCommand = {
 
 export const runCommand: LineageCommand = {
   name: "run",
-  description: "Start claude or codex with lineage session capture and MCP tools",
+  description: "Start claude or codex with Lineage; add --lineage-channel for Claude notifications",
   async run(rawArgs, context) {
     const [providerValue, ...extraArgs] = rawArgs;
     const provider = ProviderSchema.parse(providerValue ?? "");
-    const result = await runAgent({ cwd: context.cwd, provider, extraArgs: [...extraArgs] });
+    const channel = extraArgs.includes("--lineage-channel");
+    const agentArgs = extraArgs.filter((arg) => arg !== "--lineage-channel");
+    if (channel && provider !== "claude") {
+      throw new Error("--lineage-channel is supported only by Claude Code");
+    }
+    const result = await runAgent({ cwd: context.cwd, provider, channel, extraArgs: agentArgs });
     return context.json ? result : `exit code ${result.exitCode}`;
   },
 };

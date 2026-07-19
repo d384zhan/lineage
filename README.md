@@ -63,7 +63,7 @@ lineage run codex                  # terminal 2 — starts messaging invisibly
 # clone the same Git repository; its origin produces the same Lineage room id
 lineage init
 lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider claude
-lineage run claude                 # starts messaging and the Claude Channel
+lineage run claude --lineage-channel # optional compact Claude queue notification
 ```
 
 For computers on different networks, laptop A can run
@@ -72,12 +72,13 @@ For computers on different networks, laptop A can run
 ### Demo beats
 
 1. Alice asks from Codex: `Ask Bob through Lineage why src/auth.ts:42 was implemented this way.`
-2. Lineage runs Git blame and routes the structured question only to Bob.
+2. Lineage returns a request ID immediately, then runs Git blame and routes the
+   structured question only to Bob in the background.
 3. Bob's active Claude session wakes and asks whether to dispatch Claude,
    answer manually, or reject.
 4. On dispatch, Lineage privately matches Bob's native session history. Claude
-   receives the approved context and returns a cited answer to Alice's waiting
-   Codex tool call.
+   receives the approved context and returns a cited answer. Alice checks
+   `lineage_requests` without having blocked her Codex session.
 5. Alice commits; the post-commit hook links the session
    (`lineage link-commit`), storing the decision in Git notes.
 6. Alice disconnects. `lineage why src/auth/...` on Laptop B still reconstructs
@@ -103,8 +104,11 @@ For computers on different networks, laptop A can run
 - Use `lineage run claude|codex` for live messaging. It owns the daemon for the
   life of the coding-agent session, so no separate daemon terminal is needed.
   Launching normally still exposes pull-based MCP tools but cannot guarantee wake-ups.
-- Claude wake-ups use Claude Code Channels, currently a research-preview API.
-  The wrapper enables the registered Lineage development channel automatically.
+- Claude queue notifications use Claude Code Channels, currently a
+  research-preview API. They are off by default because Channel events appear
+  in Claude's composer. Enable them only with
+  `lineage run claude --lineage-channel`. Codex has no equivalent Lineage
+  Channel, so it checks completed answers through `lineage_requests`.
 - The relay remains intentionally live-only for this MVP. Once the recipient's
   daemon accepts a question, its per-user inbox is durable; a fully offline
   recipient is reported to the asker instead of silently holding a request.

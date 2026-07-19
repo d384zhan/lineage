@@ -2,6 +2,7 @@ import {
   renderInboundAgentRequest,
   type Actor,
   type AgentQuestion,
+  type AskInput,
   type LineageTransport,
   type RespondInput,
   type WireEnvelope,
@@ -21,6 +22,7 @@ import { ApprovalQueue, type ApprovalIo, type ApprovalOutcome, toInboundRequest 
 import {
   deleteDaemonInfo,
   INBOX_FILE,
+  OUTBOX_FILE,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
@@ -34,6 +36,7 @@ import {
   type RuntimeOpener,
 } from "./http";
 import { Inbox, type InboxEntry } from "./inbox";
+import { Outbox } from "./outbox";
 
 export interface DaemonOptions {
   cwd: string;
@@ -59,6 +62,7 @@ export interface DaemonHandle {
   actor: Actor;
   repoId: string;
   inbox: Inbox;
+  outbox: Outbox;
   approvals: ApprovalQueue;
   stop(): Promise<void>;
 }
@@ -80,6 +84,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const openRuntime: RuntimeOpener =
     options.openRuntime ?? (() => openGitLineageRuntime(options.cwd));
   const inbox = new Inbox(join(stateDir, INBOX_FILE));
+  const outbox = new Outbox(join(stateDir, OUTBOX_FILE));
   const answerer =
     options.answerer ??
     createSubAgentAnswerer({
@@ -175,6 +180,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     return { action: input.action, requestId: input.requestId };
   }
 
+  function askAsync(input: AskInput) {
+    const requestId = crypto.randomUUID();
+    const question: AgentQuestion = { text: input.text, evidence: input.evidence ?? [] };
+    outbox.add(requestId, input.recipient, question);
+    void transport.ask(input, requestId).then(
+      (answer) => {
+        outbox.markAnswered(requestId, answer);
+        io.print(`answer ready from ${input.recipient}: ${requestId}`);
+      },
+      (error) => {
+        outbox.markFailed(requestId, error);
+        io.print(`question to ${input.recipient} failed: ${requestId}`);
+      },
+    );
+    return { requestId, status: "pending" as const };
+  }
+
   const approvals = new ApprovalQueue(io, handleApproval);
 
   async function handleMessage(message: WireEnvelope): Promise<void> {
@@ -243,10 +265,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       actor,
       repoId,
       inbox,
+      outbox,
       transport,
       openRuntime,
       startedAt,
       respond,
+      askAsync,
     });
   } catch (error) {
     unsubscribe();
@@ -263,6 +287,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     actor,
     repoId,
     inbox,
+    outbox,
     approvals,
     stop: async () => {
       unsubscribe();

@@ -7,6 +7,7 @@ import {
   renderInboundAgentRequest,
   type Actor,
   type AgentAnswer,
+  type AskInput,
   type LineageTransport,
   type WireEnvelope,
 } from "@lineage/contracts";
@@ -16,6 +17,7 @@ import type { Server } from "bun";
 import { z } from "zod";
 import { toInboundRequest } from "./approval";
 import type { Inbox } from "./inbox";
+import type { Outbox } from "./outbox";
 
 export const DAEMON_SECRET_HEADER = "x-lineage-secret";
 
@@ -32,10 +34,12 @@ export interface HttpApiOptions {
   actor: Actor;
   repoId: string;
   inbox: Inbox;
+  outbox: Outbox;
   transport: LineageTransport;
   openRuntime: RuntimeOpener;
   startedAt: string;
   respond: (input: import("@lineage/contracts").RespondInput) => Promise<unknown>;
+  askAsync: (input: AskInput) => { requestId: string; status: "pending" };
 }
 
 const ReplyBodySchema = ReplyInputSchema.extend({
@@ -115,6 +119,12 @@ export function startHttpApi(options: HttpApiOptions): Server<undefined> {
         const input = AskInputSchema.parse(await request.json());
         const answer = await transport.ask(input);
         return json(answer);
+      }
+      if (request.method === "POST" && url.pathname === "/ask-async") {
+        return json(options.askAsync(AskInputSchema.parse(await request.json())), 202);
+      }
+      if (request.method === "GET" && url.pathname === "/requests") {
+        return json({ entries: options.outbox.list() });
       }
       if (request.method === "POST" && url.pathname === "/reply") {
         const input = ReplyBodySchema.parse(await request.json());

@@ -153,7 +153,7 @@ export type MessageHandler = (message: WireEnvelope) => void | Promise<void>;
 export interface LineageTransport {
   connect(config: ConnectionConfig): Promise<void>;
   publish(message: WireEnvelope): Promise<Ack>;
-  ask(input: AskInput): Promise<AgentAnswer>;
+  ask(input: AskInput, requestId?: string): Promise<AgentAnswer>;
   subscribe(handler: MessageHandler): () => void;
   close(): Promise<void>;
 }

@@ -6,11 +6,13 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonClient } from "@lineage/daemon";
-import { LINEAGE_PROVIDER_ENV } from "@lineage/contracts";
+import { LINEAGE_CHANNEL_ENV, LINEAGE_PROVIDER_ENV } from "@lineage/contracts";
 import { createTools } from "./tools";
 
 const tools = createTools({ cwd: process.cwd(), env: process.env });
-const channelEnabled = process.env[LINEAGE_PROVIDER_ENV] === "claude";
+const channelEnabled =
+  process.env[LINEAGE_PROVIDER_ENV] === "claude" &&
+  process.env[LINEAGE_CHANNEL_ENV] === "1";
 const channelInstructions = [
   "Lineage questions arrive as channel events from trusted teammates.",
   "Show the question to the user and ask whether to dispatch this agent, answer manually, or reject.",
@@ -57,10 +59,8 @@ const poll = async () => {
         method: "notifications/claude/channel",
         params: {
           content: [
-            `Incoming Lineage question from ${entry.sender.userId}:`,
-            entry.question.text,
-            `Request ID: ${entry.requestId}`,
-            "Ask the user whether to dispatch you, answer manually, or reject. Then call lineage_respond.",
+            `Lineage question from ${entry.sender.userId}: ${entry.question.text}`,
+            `Ask: dispatch, manual, or reject? (${entry.requestId})`,
           ].join("\n"),
           meta: {
             source: "lineage",

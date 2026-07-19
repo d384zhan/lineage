@@ -5,11 +5,13 @@ import { AgentQuestionSchema } from "./transport";
 export const LINEAGE_SESSION_ID_ENV = "LINEAGE_SESSION_ID";
 export const LINEAGE_USER_ID_ENV = "LINEAGE_USER_ID";
 export const LINEAGE_PROVIDER_ENV = "LINEAGE_PROVIDER";
+export const LINEAGE_CHANNEL_ENV = "LINEAGE_CHANNEL";
 
 export const MCP_TOOL_NAMES = {
   announce: "lineage_announce",
   recordDecision: "lineage_record_decision",
   ask: "lineage_ask",
+  requests: "lineage_requests",
   respond: "lineage_respond",
   reply: "lineage_reply",
   why: "lineage_why",
