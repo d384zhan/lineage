@@ -249,7 +249,9 @@ export const identityCommand: LineageCommand = {
     } else if (action !== "list") {
       throw new Error("Usage: lineage identity [list|refresh|add \"Name <email>\"]");
     }
-    const identities = settings.gitIdentities ?? [];
+    const identities = settings.gitIdentities?.length
+      ? settings.gitIdentities
+      : detectGitIdentities(context.cwd);
     if (context.json) return { userId: settings.userId, gitIdentities: identities };
     return identities.length
       ? identities.map((identity) => `${identity.name} <${identity.email}>`).join("\n")

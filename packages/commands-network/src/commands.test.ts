@@ -212,6 +212,12 @@ describe("network commands", () => {
       ["--relay", "ws://localhost:8787", "--token", TOKEN, "--user", "alice"],
       { cwd: repo, json: true },
     );
+    const listed = await identityCommand.run(["list"], { cwd: repo, json: true }) as {
+      gitIdentities: Array<{ name: string; email: string }>;
+    };
+    expect(listed.gitIdentities).toEqual([
+      { name: "Alice", email: "alice@example.com" },
+    ]);
     const result = await identityCommand.run(
       ["add", "Alice Work <alice@work.example>"],
       { cwd: repo, json: true },
