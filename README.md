@@ -2,10 +2,9 @@
 
 Git blame tells you who changed a line. Lineage tells your coding agent why.
 
-Lineage connects Claude Code and Codex sessions so developers can recover the
-prompt, intent, assumptions, and chronology behind a change. A teammate can ask
-your agent why code exists, send context into another session, or check what you
-are working on without leaving the terminal.
+Lineage connects Claude Code and Codex so developers can recover the prompt,
+intent, assumptions, and chronology behind a change. Teammates can ask why code
+exists, send context between sessions, and coordinate without leaving the CLI.
 
 ## What Lineage does
 
@@ -17,10 +16,10 @@ are working on without leaving the terminal.
   relay.
 - **Keeps humans in control.** A teammate cannot access local prompt history or
   agent context until the recipient approves the request.
-- **Preserves decisions in Git.** Intent and decision summaries live in Git refs
-  and notes without adding files or noise to the worktree.
-- **Catches coordination conflicts.** Concurrent intents can surface
-  incompatible assumptions before both developers commit.
+- **Preserves decisions in Git.** Intent and decision summaries live in Git
+  refs and notes without changing the worktree.
+- **Catches conflicts early.** Concurrent intents surface incompatible
+  assumptions before both developers commit.
 
 Lineage is CLI-first. There is no dashboard and no required cloud database.
 
@@ -61,10 +60,9 @@ cd /path/to/your-project
 lineage init
 ```
 
-`lineage init` derives a shared repository identity from the Git origin,
-registers the installed Claude and Codex MCP servers, installs the post-commit hook,
-and indexes existing local agent sessions. All local state stays under
-`.git/lineage/`; the worktree remains unchanged.
+`lineage init` derives an identity from the Git origin, registers the installed
+MCP servers, installs the post-commit hook, and indexes existing agent sessions.
+Local state stays under `.git/lineage/`; the worktree remains unchanged.
 
 ## Quick start on the same network
 
@@ -80,8 +78,8 @@ lineage login \
   --audience https://lineage/api
 ```
 
-The login is stored at `~/.lineage/auth.json` and refreshes automatically.
-See [Auth0 setup](#auth0-setup) if the tenant has not been configured yet.
+The login is stored at `~/.lineage/auth.json` and refreshes automatically. See
+[Auth0 setup](#auth0-setup) if the tenant is not configured yet.
 
 ### 2. Start the relay
 
@@ -110,8 +108,7 @@ lineage join --relay ws://<host-ip>:8787
 lineage run claude
 ```
 
-`lineage join` is normally needed once per repository checkout. Later sessions
-only need:
+`lineage join` is needed once per checkout. Later sessions only need:
 
 ```bash
 lineage run claude
@@ -139,21 +136,19 @@ This mode verifies possession of the shared token, not personal identity.
 
 ## Use Lineage from your agent
 
-Once the agent is launched through `lineage run`, ask naturally. The MCP tools
-carry structured objects between agents, so no frontend or shared chat window is
-required.
+Once launched through `lineage run`, ask naturally. MCP carries structured
+objects between agents, so no frontend or shared chat window is required.
 
 ### Ask why code exists
 
 ```text
-Ask Lorena through Lineage why src/cart.ts:42 reserves inventory before checkout.
-Return the exact originating prompt if her local history can match it.
+Ask <teammate> through Lineage why src/cart.ts:42 reserves inventory before checkout.
+Return the exact originating prompt if their local history can match it.
 ```
 
-Lineage traces the line to a commit, routes the question to Lorena, and asks her
-whether to dispatch her agent, answer manually, or reject. If approved, her
-agent receives local Git authorship, decision history, prompt provenance, and
-configured prompt-hook context. The response returns as a structured object.
+Lineage traces the line to a commit and asks the recipient whether to dispatch
+their agent, answer manually, or reject. An approved agent receives local Git
+authorship, decision history, prompt provenance, and prompt-hook context.
 
 Recipients can be addressed by full Auth0 identity, email prefix, or a unique
 Git-name token. Ambiguous names return candidate identities instead of guessing.
@@ -161,7 +156,7 @@ Git-name token. Ambiguous names return candidate identities instead of guessing.
 ### Send one-way context
 
 ```text
-Tell Lorena's agent through Lineage that I am adding reservation expiry next,
+Tell <teammate>'s agent through Lineage that I am adding reservation expiry next,
 so its cart schema should leave room for an expiry timestamp. Send this as context.
 ```
 
@@ -202,8 +197,8 @@ Lineage warns both developers before the changes silently diverge.
 
 ## Decision history
 
-Lineage stores current intent in per-user Git refs and attaches approved
-decision summaries to commits with Git notes.
+Lineage stores current intent in per-user Git refs and attaches decision
+summaries to commits with Git notes.
 
 ```bash
 # Explain a file, symbol, text query, or exact line
@@ -243,12 +238,11 @@ teammate daemon ─── approval ─── teammate agent
 ```
 
 - The **MCP server** exposes history, coordination, approval, and reply tools.
-- The **local daemon** owns one relay connection, durable inbox/outbox state,
-  prompt matching, Git authorship checks, and local hook execution.
+- The **local daemon** owns the relay connection, inbox/outbox, prompt matching,
+  authorship checks, and local hooks.
 - The **relay** verifies room membership and routes live structured messages. It
   does not run an LLM or store conversation history.
-- The **Git store** keeps durable, shareable decision summaries separate from
-  source branches.
+- The **Git store** keeps decision summaries separate from source branches.
 - The **prompt index** stores metadata and pointers into native local session
   files, not copied prompt text.
 
@@ -272,7 +266,7 @@ Inspect or revoke approved members with:
 
 ```bash
 lineage members list
-lineage members revoke lorena@example.com
+lineage members revoke teammate@example.com
 ```
 
 ## Different networks
@@ -284,23 +278,8 @@ Lineage includes an optional Cloudflare Quick Tunnel wrapper:
 lineage tunnel --port 8787
 ```
 
-Joiners use the printed `wss://` URL. Quick Tunnels do not require an API key,
-but they are intended for temporary demos rather than production hosting.
-
-## Current limitations
-
-- The relay is live-only. An offline recipient produces an explicit error rather
-  than receiving a queued message later.
-- Claude Channels are a research-preview API. Launching Claude normally still
-  exposes pull-based MCP tools but cannot guarantee live wake-ups.
-- Codex has no equivalent channel API, so incoming and completed messages are
-  retrieved through MCP rather than injected as live interrupts.
-- With more than two same-user Claude sessions, the first eligible session to
-  poll receives one-way context.
-- The first `lineage run` session owns the shared daemon. Closing it disconnects
-  other sessions until one starts Lineage again.
-- The relay and local stores are an MVP, not production multi-tenant
-  infrastructure.
+Joiners use the printed `wss://` URL. Quick Tunnels require no API key and are
+best suited to temporary demos.
 
 ## Auth0 setup
 
@@ -361,18 +340,13 @@ bun run typecheck
 bun test
 ```
 
-Workspace packages:
-
-- `packages/contracts`: shared schemas and provider-neutral runtime contracts
-- `packages/core`: intent, decision, and conflict behavior
-- `packages/git-store`: Git refs and notes persistence
-- `packages/prompt-index`: private Claude and Codex provenance index
-- `packages/commands-history`: history commands
-- `packages/relay`: WebSocket rooms, authentication, aliases, and routing
-- `packages/transport`: reconnecting WebSocket client and request correlation
-- `packages/daemon`: local state, approvals, prompt hooks, and HTTP API
-- `packages/mcp`: MCP tools and Claude Channel notifications
-- `packages/commands-network`: setup, identity, relay, and agent-wrapper commands
-- `packages/cli`: CLI entrypoint
-
 See [CONTRACTS.md](./CONTRACTS.md) for protocol and persistence contracts.
+
+## Roadmap
+
+- Durable delivery for offline recipients
+- Native live wake-ups across more agent harnesses
+- Explicit routing among three or more sessions on one computer
+- A daemon lifecycle independent of the first agent session
+- Hosted relays and durable multi-tenant storage
+- Immediate disconnection when a host revokes an active member
