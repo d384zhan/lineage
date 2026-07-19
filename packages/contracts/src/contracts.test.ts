@@ -53,10 +53,12 @@ describe("shared contract fixtures", () => {
         text: "Why rotate refresh tokens?",
         evidence: [{ kind: "file", value: "src/auth.ts" }],
       },
+      localContext: ["The service must support server rendering."],
     });
     expect(prompt).toContain('<lineage_request id="request-1" from="bob">');
     expect(prompt).toContain("lineage_reply");
     expect(prompt).toContain("file: src/auth.ts");
+    expect(prompt).toContain("<local_context>The service must support server rendering.</local_context>");
   });
 
   test("allows exact prompts only in transient answers", () => {

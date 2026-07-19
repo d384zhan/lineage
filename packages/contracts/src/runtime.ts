@@ -42,6 +42,7 @@ export const InboundAgentRequestSchema = z.object({
   sender: ActorSchema,
   question: AgentQuestionSchema,
   quotedPrompt: z.string().min(1).optional(),
+  localContext: z.array(z.string().min(1)).optional(),
 });
 
 export type InboundAgentRequest = z.infer<typeof InboundAgentRequestSchema>;
@@ -60,11 +61,18 @@ export function renderInboundAgentRequest(input: InboundAgentRequest): string {
         `Include it unchanged in the quotedPrompt field when calling ${MCP_TOOL_NAMES.reply}.`,
       ].join("\n")
     : "";
+  const localContext = parsed.localContext?.length
+    ? [
+        "Local context supplied by the recipient's approved UserPromptSubmit hooks:",
+        ...parsed.localContext.map((context) => `<local_context>${context}</local_context>`),
+      ].join("\n")
+    : "";
   return [
     `<lineage_request id="${parsed.requestId}" from="${parsed.sender.userId}">`,
     parsed.question.text,
     evidence.trimEnd(),
     provenance,
+    localContext,
     `Respond with the ${MCP_TOOL_NAMES.reply} MCP tool using requestId "${parsed.requestId}".`,
     "</lineage_request>",
   ]

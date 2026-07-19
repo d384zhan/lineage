@@ -19,6 +19,7 @@ export function toInboundRequest(entry: InboxEntry): InboundAgentRequest {
     sender: entry.sender,
     question: entry.question,
     ...(entry.quotedPrompt ? { quotedPrompt: entry.quotedPrompt } : {}),
+    ...(entry.localContext?.length ? { localContext: entry.localContext } : {}),
   };
 }
 

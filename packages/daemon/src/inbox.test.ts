@@ -60,6 +60,7 @@ describe("Inbox", () => {
       const inbox = new Inbox(path);
       inbox.add("request-1", SENDER, QUESTION);
       inbox.attachQuotedPrompt("request-1", "private originating prompt");
+      inbox.attachLocalContext("request-1", ["private second-brain context"]);
       inbox.approveForAgent("request-1");
 
       let restored = new Inbox(path);
@@ -67,6 +68,7 @@ describe("Inbox", () => {
       // safely asks again instead of pretending that context survived.
       expect(restored.get("request-1")?.status).toBe("pending");
       expect(restored.get("request-1")?.quotedPrompt).toBeUndefined();
+      expect(restored.get("request-1")?.localContext).toBeUndefined();
 
       inbox.markAnswered("request-1", {
         requestId: "request-1",
@@ -78,6 +80,7 @@ describe("Inbox", () => {
       restored = new Inbox(path);
       expect(restored.get("request-1")?.answer?.quotedPrompt).toBeUndefined();
       expect(readFileSync(path, "utf8")).not.toContain("private originating prompt");
+      expect(readFileSync(path, "utf8")).not.toContain("private second-brain context");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

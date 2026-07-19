@@ -76,9 +76,10 @@ For computers on different networks, laptop A can run
    structured question only to Bob in the background.
 3. Bob's active Claude session wakes and asks whether to dispatch Claude,
    answer manually, or reject.
-4. On dispatch, Lineage privately matches Bob's native session history. Claude
-   receives the approved context and returns a cited answer. Alice checks
-   `lineage_requests` without having blocked her Codex session.
+4. On dispatch, Lineage privately matches Bob's native session history and
+   runs Bob's configured `UserPromptSubmit` context hooks against the question.
+   Claude receives the approved local context and returns a cited answer. Alice
+   checks `lineage_requests` without having blocked her Codex session.
 5. Alice commits; the post-commit hook links the session
    (`lineage link-commit`), storing the decision in Git notes.
 6. Alice disconnects. `lineage why src/auth/...` on Laptop B still reconstructs
@@ -98,6 +99,11 @@ For computers on different networks, laptop A can run
   to Git or the relay outside that answer.
 - The local inbox persists under `.git/lineage/`. Matched exact prompts remain
   memory-only; a restarted dispatch returns to pending and requires approval again.
+- Approved agent dispatches run the recipient's unconditional command-based
+  `UserPromptSubmit` hooks from Claude or Codex config. Plain Claude output and
+  Codex `additionalContext` output are normalized into the same agent request.
+  Hook context remains memory-only and never enters Git, the inbox file, or the
+  relay.
 - Both Claude Code and Codex native session logs are indexed. `lineage run`
   refreshes the index after the agent exits; `lineage index` imports existing
   history, including sessions created before Lineage was installed.

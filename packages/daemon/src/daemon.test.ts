@@ -55,6 +55,7 @@ async function startTestDaemon(
     core?: MockLineageCore;
     answerer?: AgentAnswerer;
     resolvePrompt?: PromptResolver;
+    contextResolver?: (prompt: string) => Promise<string[]>;
     cwd?: string;
     promptIndexOptions?: RefreshIndexOptions;
     approvalMode?: "terminal" | "external";
@@ -73,6 +74,7 @@ async function startTestDaemon(
     openRuntime: async () => ({ core, close: () => {} }),
     answerer: options.answerer ?? (async () => {}),
     ...(options.resolvePrompt ? { resolvePrompt: options.resolvePrompt } : {}),
+    ...(options.contextResolver ? { contextResolver: options.contextResolver } : {}),
     ...(options.promptIndexOptions ? { promptIndexOptions: options.promptIndexOptions } : {}),
     ...(options.approvalMode ? { approvalMode: options.approvalMode } : {}),
   });
@@ -187,6 +189,7 @@ describe("daemon", () => {
     const bob = await startTestDaemon("bob", "claude", {
       approvalMode: "external",
       resolvePrompt: async () => "Use cookies for server rendering",
+      contextResolver: async (prompt) => [`<second-brain-context>${prompt}</second-brain-context>`],
     });
 
     const pending = alice.client.ask({
@@ -200,6 +203,9 @@ describe("daemon", () => {
       rendered: string;
     };
     expect(dispatched.rendered).toContain("Use cookies for server rendering");
+    expect(dispatched.rendered).toContain(
+      "<second-brain-context>Why cookies?</second-brain-context>",
+    );
     expect(bob.handle.inbox.get(requestId)?.status).toBe("approved_agent");
 
     await bob.client.reply({ requestId, text: "Cookies are available during SSR." });

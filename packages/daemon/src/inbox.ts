@@ -13,10 +13,12 @@ export interface InboxEntry {
   answer?: AgentAnswer;
   /** Held only in daemon memory after the developer approves agent access. */
   quotedPrompt?: string;
+  /** Held only in daemon memory after local context hooks run. */
+  localContext?: string[];
 }
 
-function withoutExactPrompt(entry: InboxEntry): InboxEntry {
-  const { quotedPrompt: _quotedPrompt, answer, ...safe } = entry;
+function withoutPrivateContext(entry: InboxEntry): InboxEntry {
+  const { quotedPrompt: _quotedPrompt, localContext: _localContext, answer, ...safe } = entry;
   if (!answer) return safe;
   const { quotedPrompt: _answerPrompt, ...safeAnswer } = answer;
   return { ...safe, answer: safeAnswer };
@@ -30,7 +32,7 @@ export class Inbox {
     try {
       const stored = JSON.parse(readFileSync(path, "utf8")) as InboxEntry[];
       for (const entry of stored) {
-        const safe = withoutExactPrompt(entry);
+        const safe = withoutPrivateContext(entry);
         this.entries.set(
           safe.requestId,
           safe.status === "approved_agent" ? { ...safe, status: "pending" } : safe,
@@ -86,6 +88,12 @@ export class Inbox {
     return entry;
   }
 
+  attachLocalContext(requestId: string, localContext: string[]): InboxEntry {
+    const entry = this.require(requestId);
+    entry.localContext = localContext;
+    return entry;
+  }
+
   markAnswered(requestId: string, answer: AgentAnswer): InboxEntry {
     const entry = this.require(requestId);
     if (entry.status === "answered" || entry.status === "rejected") {
@@ -110,7 +118,7 @@ export class Inbox {
   private persist(): void {
     if (!this.path) return;
     mkdirSync(dirname(this.path), { recursive: true });
-    const safe = this.list().map(withoutExactPrompt);
+    const safe = this.list().map(withoutPrivateContext);
     const temporary = `${this.path}.${process.pid}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(safe, null, 2)}\n`, { mode: 0o600 });
     renameSync(temporary, this.path);

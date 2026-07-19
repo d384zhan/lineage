@@ -37,6 +37,7 @@ import {
 } from "./http";
 import { Inbox, type InboxEntry } from "./inbox";
 import { Outbox } from "./outbox";
+import { runUserPromptContextHooks } from "./prompt-hooks";
 
 export interface DaemonOptions {
   cwd: string;
@@ -52,6 +53,7 @@ export interface DaemonOptions {
   promptIndexOptions?: RefreshIndexOptions;
   /** Terminal keeps the legacy a/m/r prompt; external lets the active agent handle it. */
   approvalMode?: "terminal" | "external";
+  contextResolver?: (prompt: string) => Promise<string[]>;
 }
 
 export type PromptResolver = (question: AgentQuestion) => Promise<string | undefined>;
@@ -104,8 +106,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     if (runnerUp && candidate.score - runnerUp.score < 10) return undefined;
     return candidate ? readExactPrompt(candidate.entry) : undefined;
   });
+  const resolveContext = options.contextResolver ?? ((prompt: string) =>
+    runUserPromptContextHooks({ provider: network.provider, cwd: options.cwd, prompt }));
 
   async function approveForAgent(entry: InboxEntry) {
+    try {
+      const context = await resolveContext(entry.question.text);
+      if (context.length) inbox.attachLocalContext(entry.requestId, context);
+    } catch (error) {
+      io.print(`context hooks skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     try {
       const quotedPrompt = await resolvePrompt(entry.question);
       if (quotedPrompt) {
