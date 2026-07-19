@@ -40,6 +40,7 @@ export type RespondInput = z.infer<typeof RespondInputSchema>;
 export const InboundAgentRequestSchema = z.object({
   requestId: IdentifierSchema,
   sender: ActorSchema,
+  recipient: ActorSchema.optional(),
   question: AgentQuestionSchema,
   quotedPrompt: z.string().min(1).optional(),
   localContext: z.array(z.string().min(1)).optional(),
@@ -49,6 +50,12 @@ export type InboundAgentRequest = z.infer<typeof InboundAgentRequestSchema>;
 
 export function renderInboundAgentRequest(input: InboundAgentRequest): string {
   const parsed = InboundAgentRequestSchema.parse(input);
+  const identity = parsed.recipient
+    ? [
+        `You are answering as Lineage user "${parsed.recipient.userId}". In the question, "you" means this user, not everyone who has contributed to the shared repository.`,
+        `Do not claim repository work as ${parsed.recipient.userId}'s unless Git authorship, Lineage authorship, or local prompt provenance supports that attribution. Separate other contributors' work and state uncertainty explicitly.`,
+      ].join("\n")
+    : "";
   const evidence = parsed.question.evidence.length
     ? `\nEvidence:\n${parsed.question.evidence
         .map((item) => `- ${item.kind}: ${item.value}`)
@@ -68,7 +75,8 @@ export function renderInboundAgentRequest(input: InboundAgentRequest): string {
       ].join("\n")
     : "";
   return [
-    `<lineage_request id="${parsed.requestId}" from="${parsed.sender.userId}">`,
+    `<lineage_request id="${parsed.requestId}" from="${parsed.sender.userId}"${parsed.recipient ? ` to="${parsed.recipient.userId}"` : ""}>`,
+    identity,
     parsed.question.text,
     evidence.trimEnd(),
     provenance,

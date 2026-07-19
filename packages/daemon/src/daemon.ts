@@ -130,7 +130,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       io.print(`prompt lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
     }
     inbox.approveForAgent(entry.requestId);
-    return toInboundRequest(entry);
+    return toInboundRequest(entry, actor);
   }
 
   async function handleApproval(entry: InboxEntry, outcome: ApprovalOutcome): Promise<void> {

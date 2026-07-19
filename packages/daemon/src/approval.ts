@@ -1,4 +1,4 @@
-import { renderInboundAgentRequest, type InboundAgentRequest } from "@lineage/contracts";
+import { renderInboundAgentRequest, type Actor, type InboundAgentRequest } from "@lineage/contracts";
 import type { InboxEntry } from "./inbox";
 
 /** Terminal I/O seam so tests can script the a/m/r flow. */
@@ -13,10 +13,11 @@ export interface ApprovalOutcome {
   text?: string;
 }
 
-export function toInboundRequest(entry: InboxEntry): InboundAgentRequest {
+export function toInboundRequest(entry: InboxEntry, recipient?: Actor): InboundAgentRequest {
   return {
     requestId: entry.requestId,
     sender: entry.sender,
+    ...(recipient ? { recipient } : {}),
     question: entry.question,
     ...(entry.quotedPrompt ? { quotedPrompt: entry.quotedPrompt } : {}),
     ...(entry.localContext?.length ? { localContext: entry.localContext } : {}),

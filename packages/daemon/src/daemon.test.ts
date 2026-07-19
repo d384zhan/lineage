@@ -203,6 +203,7 @@ describe("daemon", () => {
       rendered: string;
     };
     expect(dispatched.rendered).toContain("Use cookies for server rendering");
+    expect(dispatched.rendered).toContain('You are answering as Lineage user "bob"');
     expect(dispatched.rendered).toContain(
       "<second-brain-context>Why cookies?</second-brain-context>",
     );

@@ -160,7 +160,7 @@ export function startHttpApi(options: HttpApiOptions): Server<undefined> {
             ...entry,
             rendered:
               entry.status === "pending" || entry.status === "approved_agent"
-                ? renderInboundAgentRequest(toInboundRequest(entry))
+                ? renderInboundAgentRequest(toInboundRequest(entry, actor))
                 : undefined,
           })),
         });
