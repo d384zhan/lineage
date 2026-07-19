@@ -207,7 +207,7 @@ export const joinCommand: LineageCommand = {
     if (!context.json) {
       return [
         `Joined room ${repoId} as ${settings.userId} via ${relayUrl}.`,
-        "Next: run `lineage daemon` in a separate terminal to go online.",
+        `Next: run \`lineage run ${settings.provider ?? "claude"}\` to start your agent with messaging.`,
       ].join("\n");
     }
     return { repoId, ...settings, roomToken: "<saved>" };
@@ -216,7 +216,7 @@ export const joinCommand: LineageCommand = {
 
 export const daemonCommand: LineageCommand = {
   name: "daemon",
-  description: "Go online: connect to the relay and approve incoming questions here",
+  description: "Legacy standalone messaging process (lineage run starts this automatically)",
   async run(_rawArgs, context) {
     const readline = createInterface({ input: process.stdin, output: process.stdout });
     const io: ApprovalIo = {

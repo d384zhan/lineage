@@ -3,6 +3,7 @@ import {
   IntentRecordSchema,
   PROTOCOL_VERSION,
   ReplyInputSchema,
+  RespondInputSchema,
   renderInboundAgentRequest,
   type Actor,
   type AgentAnswer,
@@ -34,6 +35,7 @@ export interface HttpApiOptions {
   transport: LineageTransport;
   openRuntime: RuntimeOpener;
   startedAt: string;
+  respond: (input: import("@lineage/contracts").RespondInput) => Promise<unknown>;
 }
 
 const ReplyBodySchema = ReplyInputSchema.extend({
@@ -138,6 +140,9 @@ export function startHttpApi(options: HttpApiOptions): Server<undefined> {
         await publishAnswer(transport, repoId, actor, entry.sender.userId, answer);
         inbox.markAnswered(input.requestId, answer);
         return json({ ok: true });
+      }
+      if (request.method === "POST" && url.pathname === "/respond") {
+        return json(await options.respond(RespondInputSchema.parse(await request.json())));
       }
       if (request.method === "GET" && url.pathname === "/inbox") {
         return json({

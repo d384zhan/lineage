@@ -5,6 +5,7 @@ import {
   type AskInput,
   type IntentRecord,
   type ReplyInput,
+  type RespondInput,
 } from "@lineage/contracts";
 import { TransportError } from "@lineage/transport";
 import { z } from "zod";
@@ -72,6 +73,10 @@ export class DaemonClient {
 
   async reply(input: ReplyInput & { mode?: "agent" | "manual" | "history" }): Promise<void> {
     await this.request("POST", "/reply", input);
+  }
+
+  async respond(input: RespondInput): Promise<unknown> {
+    return await this.request("POST", "/respond", input);
   }
 
   async inbox(): Promise<InboxSnapshotEntry[]> {

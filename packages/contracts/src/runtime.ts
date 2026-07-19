@@ -10,11 +10,30 @@ export const MCP_TOOL_NAMES = {
   announce: "lineage_announce",
   recordDecision: "lineage_record_decision",
   ask: "lineage_ask",
+  respond: "lineage_respond",
   reply: "lineage_reply",
   why: "lineage_why",
   timeline: "lineage_timeline",
   inbox: "lineage_inbox",
 } as const;
+
+export const RespondInputSchema = z
+  .object({
+    requestId: IdentifierSchema,
+    action: z.enum(["dispatch", "manual", "reject"]),
+    text: z.string().min(1).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.action === "manual" && !input.text) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["text"],
+        message: "Manual responses require text",
+      });
+    }
+  });
+
+export type RespondInput = z.infer<typeof RespondInputSchema>;
 
 export const InboundAgentRequestSchema = z.object({
   requestId: IdentifierSchema,

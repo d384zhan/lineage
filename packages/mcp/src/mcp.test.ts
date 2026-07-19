@@ -9,7 +9,7 @@ import {
   MCP_TOOL_NAMES,
 } from "@lineage/contracts";
 import { MockLineageCore } from "@lineage/contracts/testing";
-import { startDaemon, type ApprovalIo, type DaemonHandle } from "@lineage/daemon";
+import { DaemonClient, startDaemon, type ApprovalIo, type DaemonHandle } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
 import { FakeMcpClient } from "../test/fake-client";
 
@@ -196,5 +196,58 @@ describe("mcp server", () => {
     expect(answer.mode).toBe("agent");
     expect(answer.text).toBe("HttpOnly cookies survive XSS.");
     expect(answer.requestId).toBe(requestId);
+  });
+
+  test("pushes a pending question into Claude and handles it in the active session", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const repo = await makeTempRepo();
+    const bob = await startDaemon({
+      cwd: repo,
+      io: new ScriptedIo(),
+      approvalMode: "external",
+      stateDir: join(repo, ".git", "lineage"),
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "bob", provider: "claude" },
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+      resolvePrompt: async () => "Implement cookie auth for SSR",
+    });
+    daemons.push(bob);
+
+    const aliceState = mkdtempSync(join(tmpdir(), "lineage-alice-channel-"));
+    tempDirs.push(aliceState);
+    const alice = await startDaemon({
+      cwd: aliceState,
+      io: new ScriptedIo(),
+      stateDir: aliceState,
+      repoId: "repo-1",
+      network: { relayUrl: relay.url, roomToken: TOKEN, userId: "alice", provider: "codex" },
+      openRuntime: async () => ({ core: new MockLineageCore(), close: () => {} }),
+    });
+    daemons.push(alice);
+
+    const activeClaude = await makeClient(repo, {
+      [LINEAGE_USER_ID_ENV]: "bob",
+      [LINEAGE_PROVIDER_ENV]: "claude",
+    });
+    const asking = DaemonClient.forPort(alice.port, alice.secret).ask({
+      recipient: "bob",
+      text: "Why cookies?",
+    });
+    await until(() =>
+      activeClaude.notifications.some(
+        (notification) => notification.method === "notifications/claude/channel",
+      ),
+    );
+    const requestId = bob.inbox.open()[0]!.requestId;
+    const dispatched = await activeClaude.callTool(MCP_TOOL_NAMES.respond, {
+      requestId,
+      action: "dispatch",
+    });
+    expect(dispatched.text).toContain("Implement cookie auth for SSR");
+    await activeClaude.callTool(MCP_TOOL_NAMES.reply, {
+      requestId,
+      text: "Cookies are readable during server rendering.",
+    });
+    expect((await asking).text).toBe("Cookies are readable during server rendering.");
   });
 });

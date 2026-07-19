@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Inbox } from "./inbox";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const SENDER = { userId: "bob", provider: "codex" as const };
 const QUESTION = { text: "Why rotate refresh tokens?", evidence: [] };
@@ -48,5 +51,35 @@ describe("Inbox", () => {
     inbox.approveForAgent("request-1");
     expect(() => inbox.approveForAgent("request-1")).toThrow("not pending");
     expect(() => inbox.markRejected("nope")).toThrow("Unknown requestId");
+  });
+
+  test("persists per-user delivery state without persisting exact prompts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lineage-inbox-"));
+    const path = join(dir, "inbox.json");
+    try {
+      const inbox = new Inbox(path);
+      inbox.add("request-1", SENDER, QUESTION);
+      inbox.attachQuotedPrompt("request-1", "private originating prompt");
+      inbox.approveForAgent("request-1");
+
+      let restored = new Inbox(path);
+      // Dispatch approval depended on memory-only prompt context, so a restart
+      // safely asks again instead of pretending that context survived.
+      expect(restored.get("request-1")?.status).toBe("pending");
+      expect(restored.get("request-1")?.quotedPrompt).toBeUndefined();
+
+      inbox.markAnswered("request-1", {
+        requestId: "request-1",
+        mode: "agent",
+        text: "Approved answer",
+        quotedPrompt: "private originating prompt",
+        evidence: [],
+      });
+      restored = new Inbox(path);
+      expect(restored.get("request-1")?.answer?.quotedPrompt).toBeUndefined();
+      expect(readFileSync(path, "utf8")).not.toContain("private originating prompt");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

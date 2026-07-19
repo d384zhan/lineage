@@ -12,6 +12,8 @@ import {
   resolveExecutable,
   resolveStateDir,
   findRepoRoot,
+  startDaemon,
+  type DaemonHandle,
 } from "@lineage/daemon";
 
 export interface RunAgentOptions {
@@ -62,16 +64,18 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const network = await readNetworkSettings(stateDir);
   const userId = options.userId ?? network?.userId ?? process.env.USER ?? "unknown";
 
-  try {
-    await DaemonClient.open(options.cwd);
-  } catch {
-    print(
-      "Note: the lineage daemon is not running — teammates will not see live activity. Start `lineage daemon` in another terminal.",
-    );
-  }
-
   const sessionId = crypto.randomUUID();
-  const requested = options.agentCommand ?? [options.provider, ...(options.extraArgs ?? [])];
+  const extraArgs = options.extraArgs ?? [];
+  const channelArgs =
+    options.provider === "claude" &&
+    !extraArgs.includes("--dangerously-load-development-channels")
+      ? ["--dangerously-load-development-channels", "server:lineage"]
+      : [];
+  const requested = options.agentCommand ?? [
+    options.provider,
+    ...channelArgs,
+    ...extraArgs,
+  ];
   const command = options.agentCommand ?? resolveExecutable(requested);
   if (!command) {
     throw new Error(
@@ -79,17 +83,43 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     );
   }
 
+  let ownedDaemon: DaemonHandle | undefined;
+  try {
+    await DaemonClient.open(options.cwd);
+  } catch {
+    if (network) {
+      ownedDaemon = await startDaemon({
+        cwd: options.cwd,
+        approvalMode: "external",
+        io: {
+          print: (line) => print(`[lineage] ${line}`),
+          prompt: async () => {
+            throw new Error("Interactive approval belongs in the active coding-agent session");
+          },
+        },
+      });
+      print("Lineage messaging is online in this session.");
+    } else {
+      print("Lineage messaging is offline. Run `lineage join` to connect this repo.");
+    }
+  }
+
   print(`Starting ${options.provider} (lineage session ${sessionId})...`);
   const spawn = options.spawn ?? defaultSpawn;
-  const exitCode = await spawn(
-    command,
-    {
-      [LINEAGE_SESSION_ID_ENV]: sessionId,
-      [LINEAGE_USER_ID_ENV]: userId,
-      [LINEAGE_PROVIDER_ENV]: options.provider,
-    },
-    options.cwd,
-  );
+  let exitCode: number;
+  try {
+    exitCode = await spawn(
+      command,
+      {
+        [LINEAGE_SESSION_ID_ENV]: sessionId,
+        [LINEAGE_USER_ID_ENV]: userId,
+        [LINEAGE_PROVIDER_ENV]: options.provider,
+      },
+      options.cwd,
+    );
+  } finally {
+    await ownedDaemon?.stop();
+  }
   let captured = false;
   try {
     await refreshPromptIndex(options.indexOptions);

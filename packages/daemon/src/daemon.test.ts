@@ -57,6 +57,7 @@ async function startTestDaemon(
     resolvePrompt?: PromptResolver;
     cwd?: string;
     promptIndexOptions?: RefreshIndexOptions;
+    approvalMode?: "terminal" | "external";
   } = {},
 ): Promise<TestDaemon> {
   const stateDir = mkdtempSync(join(tmpdir(), `lineage-daemon-${userId}-`));
@@ -73,6 +74,7 @@ async function startTestDaemon(
     answerer: options.answerer ?? (async () => {}),
     ...(options.resolvePrompt ? { resolvePrompt: options.resolvePrompt } : {}),
     ...(options.promptIndexOptions ? { promptIndexOptions: options.promptIndexOptions } : {}),
+    ...(options.approvalMode ? { approvalMode: options.approvalMode } : {}),
   });
   daemons.push(handle);
   return { handle, client: DaemonClient.forPort(handle.port, handle.secret), core, io };
@@ -177,6 +179,31 @@ describe("daemon", () => {
     expect(answer.quotedPrompt).toBe("implement cookie auth for server rendering");
     const entries = await bob.client.inbox();
     expect(entries[0]!.status).toBe("answered");
+  });
+
+  test("external dispatch returns approved context to the active agent", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const alice = await startTestDaemon("alice", "codex");
+    const bob = await startTestDaemon("bob", "claude", {
+      approvalMode: "external",
+      resolvePrompt: async () => "Use cookies for server rendering",
+    });
+
+    const pending = alice.client.ask({
+      recipient: "bob",
+      text: "Why cookies?",
+      evidence: [{ kind: "file", value: "src/auth.ts:1" }],
+    });
+    await until(() => bob.handle.inbox.open().length === 1);
+    const requestId = bob.handle.inbox.open()[0]!.requestId;
+    const dispatched = await bob.client.respond({ requestId, action: "dispatch" }) as {
+      rendered: string;
+    };
+    expect(dispatched.rendered).toContain("Use cookies for server rendering");
+    expect(bob.handle.inbox.get(requestId)?.status).toBe("approved_agent");
+
+    await bob.client.reply({ requestId, text: "Cookies are available during SSR." });
+    expect((await pending).text).toBe("Cookies are available during SSR.");
   });
 
   test("approved cross-agent answer resolves and returns the exact native-session prompt", async () => {

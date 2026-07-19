@@ -1,4 +1,12 @@
-import type { Actor, AgentQuestion, LineageTransport, WireEnvelope } from "@lineage/contracts";
+import {
+  renderInboundAgentRequest,
+  type Actor,
+  type AgentQuestion,
+  type LineageTransport,
+  type RespondInput,
+  type WireEnvelope,
+} from "@lineage/contracts";
+import { join } from "node:path";
 import { openGitLineageRuntime } from "@lineage/git-store";
 import {
   lineSpecFromEvidence,
@@ -12,6 +20,7 @@ import { createSubAgentAnswerer, type AgentAnswerer } from "./agent-answerer";
 import { ApprovalQueue, type ApprovalIo, type ApprovalOutcome, toInboundRequest } from "./approval";
 import {
   deleteDaemonInfo,
+  INBOX_FILE,
   readNetworkSettings,
   readRepoId,
   resolveStateDir,
@@ -38,6 +47,8 @@ export interface DaemonOptions {
   httpPort?: number;
   resolvePrompt?: PromptResolver;
   promptIndexOptions?: RefreshIndexOptions;
+  /** Terminal keeps the legacy a/m/r prompt; external lets the active agent handle it. */
+  approvalMode?: "terminal" | "external";
 }
 
 export type PromptResolver = (question: AgentQuestion) => Promise<string | undefined>;
@@ -68,7 +79,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     options.transport ?? new WebSocketLineageTransport({ log: (line) => io.print(line) });
   const openRuntime: RuntimeOpener =
     options.openRuntime ?? (() => openGitLineageRuntime(options.cwd));
-  const inbox = new Inbox();
+  const inbox = new Inbox(join(stateDir, INBOX_FILE));
   const answerer =
     options.answerer ??
     createSubAgentAnswerer({
@@ -89,23 +100,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     return candidate ? readExactPrompt(candidate.entry) : undefined;
   });
 
+  async function approveForAgent(entry: InboxEntry) {
+    try {
+      const quotedPrompt = await resolvePrompt(entry.question);
+      if (quotedPrompt) {
+        inbox.attachQuotedPrompt(entry.requestId, quotedPrompt);
+        io.print("Matched an exact local prompt. It will be shared only in this approved answer.");
+      } else if (lineSpecFromEvidence(entry.question.evidence)) {
+        io.print("No high-confidence local prompt matched this line; the agent will answer from repo history.");
+      }
+    } catch (error) {
+      io.print(`prompt lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    inbox.approveForAgent(entry.requestId);
+    return toInboundRequest(entry);
+  }
+
   async function handleApproval(entry: InboxEntry, outcome: ApprovalOutcome): Promise<void> {
     if (outcome.action === "agent") {
-      try {
-        const quotedPrompt = await resolvePrompt(entry.question);
-        if (quotedPrompt) {
-          inbox.attachQuotedPrompt(entry.requestId, quotedPrompt);
-          io.print("Matched an exact local prompt. It will be shared only in this approved answer.");
-        } else if (lineSpecFromEvidence(entry.question.evidence)) {
-          io.print("No high-confidence local prompt matched this line; the agent will answer from repo history.");
-        }
-      } catch (error) {
-        io.print(`prompt lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      inbox.approveForAgent(entry.requestId);
+      const request = await approveForAgent(entry);
       // The sub-agent may take a minute; answer flows back via /reply.
       // Do not block the approval queue on it.
-      answerer({ request: toInboundRequest(entry) }).catch((error) => {
+      answerer({ request }).catch((error) => {
         io.print(
           `agent answer failed for ${entry.requestId}: ${
             error instanceof Error ? error.message : String(error)
@@ -138,6 +154,27 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     io.print(`Rejected question from ${entry.sender.userId}.`);
   }
 
+  async function respond(input: RespondInput): Promise<unknown> {
+    const entry = inbox.get(input.requestId);
+    if (!entry) throw new Error(`Unknown requestId: ${input.requestId}`);
+    if (entry.status !== "pending") {
+      throw new Error(`Request ${input.requestId} is ${entry.status}, not pending`);
+    }
+    if (input.action === "dispatch") {
+      const request = await approveForAgent(entry);
+      return {
+        action: "dispatch",
+        request,
+        rendered: renderInboundAgentRequest(request),
+      };
+    }
+    await handleApproval(entry, {
+      action: input.action,
+      ...(input.text ? { text: input.text } : {}),
+    });
+    return { action: input.action, requestId: input.requestId };
+  }
+
   const approvals = new ApprovalQueue(io, handleApproval);
 
   async function handleMessage(message: WireEnvelope): Promise<void> {
@@ -168,7 +205,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       case "question.ask": {
         const entry = inbox.add(message.requestId, message.sender, message.payload);
-        approvals.enqueue(entry);
+        if ((options.approvalMode ?? "terminal") === "terminal") {
+          approvals.enqueue(entry);
+        } else {
+          io.print(`question queued from ${entry.sender.userId}: ${entry.requestId}`);
+        }
         return;
       }
       case "presence":
@@ -205,6 +246,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       transport,
       openRuntime,
       startedAt,
+      respond,
     });
   } catch (error) {
     unsubscribe();

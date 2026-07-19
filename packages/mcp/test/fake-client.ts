@@ -5,6 +5,8 @@ interface JsonRpcResponse {
   id?: number;
   result?: unknown;
   error?: { code: number; message: string };
+  method?: string;
+  params?: unknown;
 }
 
 /**
@@ -12,6 +14,7 @@ interface JsonRpcResponse {
  * newline-delimited JSON-RPC, exactly like Claude Code and Codex do.
  */
 export class FakeMcpClient {
+  readonly notifications: JsonRpcResponse[] = [];
   private readonly process: Subprocess<"pipe", "pipe", "inherit">;
   private readonly decoder = new TextDecoder();
   private buffer = "";
@@ -44,6 +47,8 @@ export class FakeMcpClient {
             this.pending.delete(message.id);
             resolve(message);
           }
+        } else if (message.method) {
+          this.notifications.push(message);
         }
       }
     }

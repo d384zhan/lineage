@@ -5,6 +5,7 @@ import {
   MCP_TOOL_NAMES,
   ProviderSchema,
   ReplyInputSchema,
+  RespondInputSchema,
   type Actor,
   type LineageCore,
 } from "@lineage/contracts";
@@ -176,6 +177,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         evidence: evidenceJsonSchema,
       },
       required: ["recipient"],
+    },
+  },
+  {
+    name: MCP_TOOL_NAMES.respond,
+    description:
+      "Choose how to handle a pending teammate question. Dispatch gives this active agent the approved historical context; manual sends the supplied text; reject declines it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", description: "The pending Lineage request id." },
+        action: { type: "string", enum: ["dispatch", "manual", "reject"] },
+        text: { type: "string", description: "Required for manual; optional rejection reason." },
+      },
+      required: ["requestId", "action"],
     },
   },
   {
@@ -362,6 +377,11 @@ export function createTools(options: ToolsOptions) {
         await daemon.reply({ ...input, mode: "agent" });
         return textResult(`Answer delivered for request ${input.requestId}.`);
       }
+      case MCP_TOOL_NAMES.respond: {
+        const input = RespondInputSchema.parse(args);
+        const daemon = await openDaemon();
+        return textResult(await daemon.respond(input));
+      }
       case MCP_TOOL_NAMES.why: {
         const input = WhyArgsSchema.parse(args);
         const runtime = await openRuntime();
@@ -414,7 +434,11 @@ export function createTools(options: ToolsOptions) {
     async call(name: string, args: unknown): Promise<ToolResult> {
       try {
         const result = await dispatch(name, args);
-        if (name !== MCP_TOOL_NAMES.inbox && name !== MCP_TOOL_NAMES.reply) {
+        if (
+          name !== MCP_TOOL_NAMES.inbox &&
+          name !== MCP_TOOL_NAMES.reply &&
+          name !== MCP_TOOL_NAMES.respond
+        ) {
           const footer = await pendingQuestionFooter();
           if (footer.length && result.content[0]) {
             result.content[0].text += `\n\n${footer.join("\n\n")}`;

@@ -32,15 +32,15 @@ bun run typecheck
 - `packages/commands-history`: history command implementations
 - `packages/relay`: Bun WebSocket relay (rooms per repoId, token auth, routing, acks)
 - `packages/transport`: `WebSocketLineageTransport` client with ask/answer correlation and reconnect
-- `packages/daemon`: long-running local hub — relay connection, inbox, a/m/r approval prompt, localhost HTTP API
-- `packages/mcp`: stdio MCP server exposing the seven `lineage_*` tools
+- `packages/daemon`: local hub for the relay connection, durable inbox, approvals, and localhost HTTP API
+- `packages/mcp`: stdio MCP server exposing the `lineage_*` tools and Claude Channel wake-ups
 - `packages/commands-network`: network commands and the `lineage run` agent wrapper
 - `packages/cli`: CLI dispatcher registering both command sets
 
 ## Two-laptop demo runbook
 
 One-time on each laptop: install [Bun](https://bun.sh), Git, and the agent CLI
-(`claude` and/or `codex`), then `bun install && bun link` in this repo.
+(`claude` 2.1.80+ and/or `codex`), then `bun install && bun link` in this repo.
 
 In the repository where you want to use Lineage, run `lineage init` once on
 each computer. It derives the same room identity from the Git `origin`, stores
@@ -48,25 +48,22 @@ everything under `.git/lineage/`, registers installed Claude/Codex MCP clients,
 and indexes existing sessions. It does not change the worktree or require a
 commit. Rerun it after installing another agent CLI.
 
-### Laptop A (hosts the relay, runs Claude)
+### Laptop A (hosts the relay, runs Codex)
 
 ```bash
 lineage init                       # local setup; no files to commit
 lineage host --port 8787           # terminal 1 — prints the room token
-lineage join --relay ws://localhost:8787 --token <token> --user alice --provider claude
-lineage daemon                     # terminal 2 — go online; approvals happen HERE
-claude                             # terminal 3 — launch normally
-# or: lineage run claude           # optional wrapper; refreshes the index on exit
+lineage join --relay ws://localhost:8787 --token <token> --user alice --provider codex
+lineage run codex                  # terminal 2 — starts messaging invisibly
 ```
 
-### Laptop B (clones the repo, runs Codex)
+### Laptop B (Windows, clones the repo, runs Claude)
 
 ```bash
 # clone the same Git repository; its origin produces the same Lineage room id
 lineage init
-lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider codex
-lineage daemon                     # terminal 1
-codex                              # terminal 2; `lineage run codex` is optional
+lineage join --relay ws://<laptop-a-ip>:8787 --token <token> --user bob --provider claude
+lineage run claude                 # starts messaging and the Claude Channel
 ```
 
 For computers on different networks, laptop A can run
@@ -74,18 +71,13 @@ For computers on different networks, laptop A can run
 
 ### Demo beats
 
-1. Alice announces:
-   `lineage announce --summary "Token refresh" --user alice --assume auth.token_storage=httpOnly-cookie`
-2. Bob announces the incompatible assumption
-   (`--assume auth.token_storage=localStorage`) — **both daemons print the
-   assumption conflict**.
-3. Bob asks: `lineage ask alice --line src/auth.ts:42`. Lineage runs Git blame,
-   sends the commit and line as structured evidence, and Alice's daemon matches
-   it against her local Claude/Codex history.
-4. Alice's daemon terminal shows the question; she presses **a** — a headless
-   `claude -p` sub-agent receives the matched exact prompt and answers via the
-   `lineage_reply` MCP tool (she could also answer **m**anually or **r**eject).
-   The answer and exact prompt land in Bob's terminal.
+1. Alice asks from Codex: `Ask Bob through Lineage why src/auth.ts:42 was implemented this way.`
+2. Lineage runs Git blame and routes the structured question only to Bob.
+3. Bob's active Claude session wakes and asks whether to dispatch Claude,
+   answer manually, or reject.
+4. On dispatch, Lineage privately matches Bob's native session history. Claude
+   receives the approved context and returns a cited answer to Alice's waiting
+   Codex tool call.
 5. Alice commits; the post-commit hook links the session
    (`lineage link-commit`), storing the decision in Git notes.
 6. Alice disconnects. `lineage why src/auth/...` on Laptop B still reconstructs
@@ -103,14 +95,16 @@ For computers on different networks, laptop A can run
   timestamps, touched files, and pointers into native agent JSONL files, not
   prompt text. Exact prompts are reread only after approval and are never sent
   to Git or the relay outside that answer.
-- The daemon inbox is in-memory: unanswered questions do not survive a daemon
-  restart.
+- The local inbox persists under `.git/lineage/`. Matched exact prompts remain
+  memory-only; a restarted dispatch returns to pending and requires approval again.
 - Both Claude Code and Codex native session logs are indexed. `lineage run`
   refreshes the index after the agent exits; `lineage index` imports existing
   history, including sessions created before Lineage was installed.
-- The wrapper is optional after `lineage init`. Launching Claude or Codex
-  normally still exposes the Lineage MCP tools. Run `lineage index` whenever
-  you want to refresh sessions created outside the wrapper.
-- Live agents are never injected mid-turn: approved questions run a one-shot
-  headless sub-agent, and are also surfaced through `lineage_inbox` / appended
-  to MCP tool results for agents already at work.
+- Use `lineage run claude|codex` for live messaging. It owns the daemon for the
+  life of the coding-agent session, so no separate daemon terminal is needed.
+  Launching normally still exposes pull-based MCP tools but cannot guarantee wake-ups.
+- Claude wake-ups use Claude Code Channels, currently a research-preview API.
+  The wrapper enables the registered Lineage development channel automatically.
+- The relay remains intentionally live-only for this MVP. Once the recipient's
+  daemon accepts a question, its per-user inbox is durable; a fully offline
+  recipient is reported to the asker instead of silently holding a request.
