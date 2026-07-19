@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLineageCore } from "@lineage/contracts/testing";
@@ -266,6 +266,39 @@ describe("network commands", () => {
 });
 
 describe("run wrapper", () => {
+  test("does not write daemon presence events into the active agent terminal", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const repo = await makeTempRepo();
+    await joinCommand.run(
+      ["--relay", relay.url, "--token", TOKEN, "--user", "alice", "--provider", "codex"],
+      { cwd: repo, json: true },
+    );
+    const script = join(repo, "fake-agent.ts");
+    await Bun.write(script, "await Bun.sleep(400);\n");
+    const claudeRoot = mkdtempSync(join(tmpdir(), "lineage-silent-claude-"));
+    const codexRoot = mkdtempSync(join(tmpdir(), "lineage-silent-codex-"));
+    tempDirs.push(claudeRoot, codexRoot);
+    const printed: string[] = [];
+    const running = runAgent({
+      cwd: repo,
+      provider: "codex",
+      print: (line) => printed.push(line),
+      agentCommand: ["bun", script],
+      indexOptions: {
+        indexPath: join(repo, ".git", "lineage", "silent-index.json"),
+        claudeRoot,
+        codexRoot,
+      },
+    });
+    await until(() => existsSync(join(repo, ".git", "lineage", "daemon.json")));
+    await startRepoDaemon(await makeTempRepo(), "bob");
+    await Bun.sleep(50);
+    await running;
+
+    expect(printed.some((line) => line.includes("bob is online"))).toBeFalse();
+    expect(printed).toContain("Lineage messaging is online in this session.");
+  });
+
   test("propagates lineage env to the agent and captures the transcript", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();

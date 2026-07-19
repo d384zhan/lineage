@@ -95,7 +95,9 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
         cwd: options.cwd,
         approvalMode: "external",
         io: {
-          print: (line) => print(`[lineage] ${line}`),
+          // The agent TUI owns stdout after launch. Background daemon output
+          // would be interpreted as text typed into its active composer.
+          print: () => {},
           prompt: async () => {
             throw new Error("Interactive approval belongs in the active coding-agent session");
           },
