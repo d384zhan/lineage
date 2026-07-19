@@ -13,7 +13,7 @@ import {
   type DaemonHandle,
 } from "@lineage/daemon";
 import { startRelay, type RelayHandle } from "@lineage/relay";
-import { announceCommand, askCommand, createHostMembershipAuthorizer, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, membersCommand, replyCommand } from "./commands";
+import { announceCommand, askCommand, createHostMembershipAuthorizer, createInitCommand, createJoinCommand, createLoginCommand, createLogoutCommand, identityCommand, inboxCommand, initCommand, joinCommand, membersCommand, replyCommand, selectLanAddress } from "./commands";
 import { ensureMcpRegistrations } from "./mcp-register";
 import { runAgent } from "./run-wrapper";
 import { loadPromptIndex } from "@lineage/prompt-index";
@@ -133,6 +133,17 @@ describe("mcp registration", () => {
 });
 
 describe("network commands", () => {
+  test("prefers a physical Wi-Fi adapter over Windows virtual adapters", () => {
+    expect(selectLanAddress({
+      "vEthernet (WSL)": [
+        { address: "172.24.192.1", family: "IPv4", internal: false },
+      ],
+      "Wi-Fi": [
+        { address: "192.168.1.42", family: "IPv4", internal: false },
+      ],
+    })).toBe("192.168.1.42");
+  });
+
   test("init keeps the worktree clean and can skip optional setup", async () => {
     const repo = mkdtempSync(join(tmpdir(), "lineage-init-"));
     tempDirs.push(repo);
@@ -364,6 +375,29 @@ describe("network commands", () => {
 });
 
 describe("run wrapper", () => {
+  test("refuses to reuse a daemon connected to an old relay", async () => {
+    relay = startRelay({ port: 0, token: TOKEN });
+    const repo = await makeTempRepo();
+    await joinCommand.run(
+      ["--relay", relay.url, "--token", TOKEN, "--user", "alice", "--provider", "claude"],
+      { cwd: repo, json: true },
+    );
+    await startRepoDaemon(repo, "alice");
+    await joinCommand.run(
+      ["--relay", "ws://127.0.0.1:9999", "--token", TOKEN, "--user", "alice"],
+      { cwd: repo, json: true },
+    );
+
+    const error = await runAgent({
+      cwd: repo,
+      provider: "claude",
+      agentCommand: ["claude"],
+    }).then(() => undefined).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("still using");
+    expect((error as Error).message).toContain(relay.url);
+  });
+
   test("does not write daemon presence events into the active agent terminal", async () => {
     relay = startRelay({ port: 0, token: TOKEN });
     const repo = await makeTempRepo();

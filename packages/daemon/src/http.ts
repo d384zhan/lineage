@@ -33,6 +33,7 @@ export interface HttpApiOptions {
   secret: string;
   actor: Actor;
   repoId: string;
+  relayUrl: string;
   inbox: Inbox;
   outbox: Outbox;
   transport: LineageTransport;
@@ -111,6 +112,8 @@ export function startHttpApi(options: HttpApiOptions): Server<undefined> {
         return json({
           actor,
           repoId,
+          relayUrl: options.relayUrl,
+          connected: transport.isConnected(),
           startedAt: options.startedAt,
           openQuestions: inbox.open().length,
         });

@@ -133,6 +133,10 @@ export class MockLineageTransport implements LineageTransport {
     this.connection = config;
   }
 
+  isConnected(): boolean {
+    return this.connection !== undefined;
+  }
+
   async publish(message: WireEnvelope): Promise<Ack> {
     this.published.push(message);
     return {

@@ -48,6 +48,7 @@ export class WebSocketLineageTransport implements LineageTransport {
   private ws: WebSocket | undefined;
   private config: ConnectionConfig | undefined;
   private closedByUser = false;
+  private joined = false;
   private everConnected = false;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -74,6 +75,10 @@ export class WebSocketLineageTransport implements LineageTransport {
     this.config = ConnectionConfigSchema.parse(config);
     this.closedByUser = false;
     await this.open();
+  }
+
+  isConnected(): boolean {
+    return this.joined && this.ws?.readyState === WebSocket.OPEN;
   }
 
   async publish(message: WireEnvelope): Promise<Ack> {
@@ -133,6 +138,7 @@ export class WebSocketLineageTransport implements LineageTransport {
 
   async close(): Promise<void> {
     this.closedByUser = true;
+    this.joined = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.failPending(new TransportError("request_timeout", "Transport closed"));
     this.ws?.close();
@@ -167,6 +173,7 @@ export class WebSocketLineageTransport implements LineageTransport {
 
   private async open(): Promise<void> {
     const config = this.requireConfig();
+    this.joined = false;
     const ws = new WebSocket(config.relayUrl);
     this.ws = ws;
     ws.addEventListener("message", (event) => {
@@ -213,6 +220,7 @@ export class WebSocketLineageTransport implements LineageTransport {
     // Host approval is human-driven and has no arbitrary timer. Relay errors
     // and early socket closes still reject this promise immediately.
     await this.sendWithAck(hello, null);
+    this.joined = true;
     this.everConnected = true;
     this.reconnectAttempt = 0;
     this.log(`connected to ${config.relayUrl} as ${config.actor.userId}`);
@@ -308,6 +316,7 @@ export class WebSocketLineageTransport implements LineageTransport {
   private handleClose(ws: WebSocket): void {
     if (this.ws !== ws) return;
     this.ws = undefined;
+    this.joined = false;
     this.failPendingAcks(new Error("Connection to relay lost"));
     if (this.closedByUser || !this.config || !this.everConnected) return;
     if (this.reconnectTimer) return;

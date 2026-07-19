@@ -91,10 +91,25 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
 
   let ownedDaemon: DaemonHandle | undefined;
   let agentOwnsTerminal = false;
-  try {
-    const daemon = await DaemonClient.open(options.cwd);
-    userId = (await daemon.status()).actor.userId;
-  } catch {
+  const existingDaemon = await DaemonClient.open(options.cwd).catch(() => undefined);
+  if (existingDaemon) {
+    let status = await existingDaemon.status();
+    if (network && status.relayUrl && status.relayUrl !== network.relayUrl) {
+      throw new Error(
+        `A Lineage daemon is still using ${status.relayUrl}. Stop the first Lineage session, then retry with ${network.relayUrl}.`,
+      );
+    }
+    for (let attempt = 0; status.connected === false && attempt < 6; attempt += 1) {
+      await Bun.sleep(500);
+      status = await existingDaemon.status();
+    }
+    if (status.connected === false) {
+      throw new Error(
+        `The existing Lineage daemon is disconnected from ${status.relayUrl ?? network?.relayUrl ?? "its relay"}. Stop the first Lineage session, then retry.`,
+      );
+    }
+    userId = status.actor.userId;
+  } else {
     if (network) {
       print(`Connecting to ${network.relayUrl} as ${network.userId}...`);
       ownedDaemon = await startDaemon({

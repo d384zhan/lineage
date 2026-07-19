@@ -41,13 +41,36 @@ import { ensureMcpRegistrations } from "./mcp-register";
 const NEVER = new Promise<never>(() => {});
 const HOST_APPROVAL_TOKEN = "host-approved-auth0-room";
 
+interface NetworkAddress {
+  address: string;
+  family: string | number;
+  internal: boolean;
+}
+
+export function selectLanAddress(
+  interfaces: Record<string, readonly NetworkAddress[] | undefined>,
+): string | undefined {
+  const candidates = Object.entries(interfaces).flatMap(([name, addresses]) =>
+    (addresses ?? [])
+      .filter((address) =>
+        (address.family === "IPv4" || address.family === 4) &&
+        !address.internal &&
+        !address.address.startsWith("169.254.")
+      )
+      .map((address) => ({ name, address: address.address }))
+  );
+  const virtual = /vethernet|wsl|hyper-v|docker|vmware|virtualbox|utun|bridge|loopback/i;
+  const preferred = /wi-?fi|wlan|wireless|^en0$|^ethernet|^eth0$/i;
+  return candidates.sort((left, right) => {
+    const score = (candidate: { name: string }) =>
+      (preferred.test(candidate.name) ? 100 : 0) -
+      (virtual.test(candidate.name) ? 200 : 0);
+    return score(right) - score(left);
+  })[0]?.address;
+}
+
 function localLanAddress(): string | undefined {
-  for (const addresses of Object.values(networkInterfaces())) {
-    for (const address of addresses ?? []) {
-      if (address.family === "IPv4" && !address.internal) return address.address;
-    }
-  }
-  return undefined;
+  return selectLanAddress(networkInterfaces());
 }
 
 export async function createHostMembershipAuthorizer(options: {
@@ -258,7 +281,8 @@ export const hostCommand: LineageCommand = {
     }
     console.log("");
     console.log("Teammates on this network join with:");
-    const advertisedHost = localLanAddress() ?? "<your-ip>";
+    const advertisedHost = args.get("advertise-host") ?? localLanAddress() ?? "<your-ip>";
+    console.log(`Advertising ${advertisedHost}; override with --advertise-host <ip> if needed.`);
     console.log(
       auth0Domain
         ? `  lineage join --relay ws://${advertisedHost}:${relay.port}`

@@ -353,6 +353,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       secret,
       actor,
       repoId,
+      relayUrl: network.relayUrl,
       inbox,
       outbox,
       transport,

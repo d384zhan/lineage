@@ -414,5 +414,8 @@ describe("daemon", () => {
       headers: { [DAEMON_SECRET_HEADER]: alice.handle.secret },
     });
     expect(withSecret.status).toBe(200);
+    const status = await withSecret.json() as { connected: boolean; relayUrl: string };
+    expect(status.connected).toBeTrue();
+    expect(status.relayUrl).toBe(relay.url);
   });
 });

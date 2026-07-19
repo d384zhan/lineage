@@ -28,6 +28,8 @@ export interface InboxSnapshotEntry extends InboxEntry {
 export interface DaemonStatus {
   actor: { userId: string; provider?: string };
   repoId: string;
+  relayUrl?: string;
+  connected?: boolean;
   startedAt: string;
   openQuestions: number;
 }
