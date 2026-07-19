@@ -1,5 +1,6 @@
 import { isAbsolute, relative } from "node:path";
 import type { EvidenceRef } from "@lineage/contracts";
+import { canonicalRepoPath } from "./paths";
 import { overlapCount, termHashes } from "./privacy";
 import type { CodeLineTrace, PromptCandidate, PromptIndexEntry, PromptMatchResult } from "./types";
 
@@ -20,7 +21,7 @@ export function parseLineSpec(spec: string): { path: string; line: number } {
 export async function traceCodeLine(cwd: string, spec: string): Promise<CodeLineTrace> {
   const { path, line } = parseLineSpec(spec);
   const root = await git(cwd, ["rev-parse", "--show-toplevel"]);
-  const repoPath = isAbsolute(path) ? relative(root, path) : path;
+  const repoPath = canonicalRepoPath(isAbsolute(path) ? relative(root, path) : path);
   const output = await git(root, [
     "blame", "--porcelain", `-L${line},${line}`, "--", repoPath,
   ]);
@@ -45,7 +46,11 @@ function scoreEntry(entry: PromptIndexEntry, trace: CodeLineTrace, queryHashes: 
   if (!Number.isFinite(distanceHours) || distanceHours > 24 * 14) return undefined;
   let score = 0;
   const reasons: string[] = [];
-  const fileMatch = entry.files.some((file) => file === trace.path || file.endsWith(`/${trace.path}`));
+  const tracePath = canonicalRepoPath(trace.path);
+  const fileMatch = entry.files.some((file) => {
+    const indexedPath = canonicalRepoPath(file);
+    return indexedPath === tracePath || indexedPath.endsWith(`/${tracePath}`);
+  });
   if (fileMatch) {
     score += 55;
     reasons.push("prompt references the blamed file");

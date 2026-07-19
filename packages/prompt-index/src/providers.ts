@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { Provider } from "@lineage/contracts";
+import { canonicalRepoPath } from "./paths";
 import { sha256, termHashes } from "./privacy";
 import type { PromptIndexEntry } from "./types";
 
@@ -89,17 +90,12 @@ function codexPrompt(record: Record<string, unknown>, state: CodexState, fallbac
 }
 
 function referencedFiles(text: string, cwd?: string): string[] {
-  const matches = text.match(/(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+/g) ?? [];
+  const matches = text.match(/(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+/g) ?? [];
   return normalizePaths(matches, cwd);
 }
 
 function normalizePaths(paths: readonly string[], cwd?: string): string[] {
-  return [...new Set(paths.map((path) => {
-    const clean = path.trim().replace(/^['"]|['",;]$/g, "");
-    if (!cwd || !isAbsolute(clean)) return clean.replace(/^\.\//, "");
-    const candidate = relative(cwd, clean);
-    return candidate.startsWith("..") ? clean : candidate;
-  }).filter(Boolean))].slice(0, 32);
+  return [...new Set(paths.map((path) => canonicalRepoPath(path, cwd)).filter(Boolean))].slice(0, 32);
 }
 
 function pathsFromValue(value: unknown, cwd?: string): string[] {
@@ -107,7 +103,7 @@ function pathsFromValue(value: unknown, cwd?: string): string[] {
   function visit(item: unknown, key = ""): void {
     if (typeof item === "string") {
       if (key === "file_path" || key === "path") paths.push(item);
-      for (const match of item.matchAll(/(?:\*\*\* (?:Update|Add|Delete) File: |\b)((?:\.?\.?\/|\/)?(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+)/g)) {
+      for (const match of item.matchAll(/(?:\*\*\* (?:Update|Add|Delete) File: |\b)((?:\.?\.?[\\/]|[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+)/g)) {
         if (match[1]) paths.push(match[1]);
       }
       return;

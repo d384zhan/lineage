@@ -179,7 +179,7 @@ describe("network commands", () => {
       mcp: { claude: string; codex: string };
       index: { status: string; entries: number };
     };
-    expect(registeredCwd).toBe(realpathSync(repo));
+    expect(registeredCwd.replaceAll("\\", "/")).toBe(realpathSync(repo).replaceAll("\\", "/"));
     expect(indexed).toBeTrue();
     expect(result.mcp).toMatchObject({ claude: "registered", codex: "unchanged" });
     expect(result.index).toEqual({ status: "indexed", entries: 0 });

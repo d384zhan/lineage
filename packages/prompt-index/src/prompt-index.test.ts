@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { matchPromptsForLine } from "./matcher";
+import { canonicalRepoPath } from "./paths";
 import { readExactPrompt } from "./providers";
 import { refreshPromptIndex } from "./store";
 
@@ -25,6 +26,12 @@ function git(cwd: string, args: string[]): void {
 }
 
 describe("private global prompt index", () => {
+  test("canonicalizes Windows paths to Git-style repository paths", () => {
+    expect(canonicalRepoPath("C:\\Users\\alice\\repo\\src\\auth.ts", "C:\\Users\\alice\\repo"))
+      .toBe("src/auth.ts");
+    expect(canonicalRepoPath("src\\auth.ts")).toBe("src/auth.ts");
+  });
+
   test("indexes Claude and Codex pointers without copying prompt text", async () => {
     const repo = temp("lineage-index-repo-");
     git(repo, ["init", "-q"]);
@@ -37,14 +44,14 @@ describe("private global prompt index", () => {
     const claudePrompt = "Implement secure cookie authentication for server rendering";
     await Bun.write(join(claudeRoot, "claude.jsonl"), [
       JSON.stringify({ type: "user", sessionId: "claude-1", promptId: "prompt-1", cwd: repo, gitBranch: "main", timestamp, message: { content: claudePrompt } }),
-      JSON.stringify({ type: "assistant", cwd: repo, message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: join(repo, "src", "auth.ts") } }] } }),
+      JSON.stringify({ type: "assistant", cwd: repo, message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "src\\auth.ts" } }] } }),
     ].join("\n") + "\n");
 
     const codexPrompt = "Add refresh token replay protection";
     await Bun.write(join(codexRoot, "codex.jsonl"), [
       JSON.stringify({ type: "session_meta", timestamp, payload: { id: "codex-1", cwd: repo } }),
       JSON.stringify({ type: "event_msg", timestamp, payload: { type: "user_message", message: codexPrompt } }),
-      JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call", name: "apply_patch", arguments: JSON.stringify({ patch: "*** Update File: src/token.ts" }) } }),
+      JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call", name: "apply_patch", arguments: JSON.stringify({ patch: "*** Update File: src\\token.ts" }) } }),
     ].join("\n") + "\n");
 
     const indexPath = join(repo, ".git", "lineage", "prompt-index.json");
@@ -73,7 +80,7 @@ describe("private global prompt index", () => {
     const codexRoot = temp("lineage-match-codex-");
     await Bun.write(join(claudeRoot, "session.jsonl"), [
       JSON.stringify({ type: "user", sessionId: "session-auth", cwd: repo, timestamp: promptTime, message: { content: "Use an httpOnly cookie so auth works during server rendering" } }),
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Write", input: { file_path: join(repo, "src", "auth.ts") } }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Write", input: { file_path: "src\\auth.ts" } }] } }),
     ].join("\n") + "\n");
     await Bun.write(join(repo, "src", "auth.ts"), "export const cookieName = 'session';\n");
     git(repo, ["add", "."]);
@@ -84,6 +91,8 @@ describe("private global prompt index", () => {
       claudeRoot,
       codexRoot,
     });
+    expect(index.entries[0]?.files).toContain("src/auth.ts");
+    index.entries[0]!.files = ["src\\auth.ts"];
     const result = await matchPromptsForLine(repo, "src/auth.ts:1", "repo-1", index.entries);
     expect(result.trace.summary).toBe("Add cookie authentication");
     expect(result.candidates[0]?.confidence).toBe("high");
